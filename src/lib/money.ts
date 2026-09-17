@@ -21,14 +21,14 @@ export type FormatOptions = {
   /** Omite "R$": só para o segundo nível de uma tela (linha de lista, tabela). */
   symbol?: boolean;
   /** Omite os centavos: KPI e número herói de dashboard. Arredonda para o real mais próximo. */
-  cents?: boolean;
+  decimals?: boolean;
 };
 
 const abs = (cents: bigint) => (cents < 0n ? -cents : cents);
 
 /** `formatBRL(184000n)` → "R$ 1.840,00"; com `sign` → "+ R$ 1.840,00" / "− R$ 48,90". */
 export function formatBRL(cents: bigint, opts: FormatOptions = {}): string {
-  const { sign = false, symbol = true, cents: withCents = true } = opts;
+  const { sign = false, symbol = true, decimals: withCents = true } = opts;
   const magnitude = abs(cents);
   const reais = withCents ? Number(magnitude) / 100 : Number(roundToReais(magnitude));
   let out = (withCents ? brl : brlNoCents).format(reais);

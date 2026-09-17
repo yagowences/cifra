@@ -1,8 +1,9 @@
 "use client";
 
-import { Ellipsis, House, Plus, Rows3, Target } from "lucide-react";
+import { Ellipsis, House, Rows3, Target } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { NovoLancamentoButton } from "@/components/transactions/novo-lancamento-button";
 import { cn } from "@/lib/utils";
 import { isActive } from "./nav-items";
 
@@ -36,14 +37,7 @@ export function BottomNav() {
       className="fixed inset-x-0 bottom-0 z-40 flex h-19 items-center justify-around border-t border-border-subtle bg-surface-overlay px-2 pb-[env(safe-area-inset-bottom)] backdrop-blur-[12px] lg:hidden"
     >
       {TABS.slice(0, 2).map(tab)}
-      {/* Lançamento rápido chega na tarefa 4; por ora leva à lista de transações. */}
-      <Link
-        href="/transacoes"
-        aria-label="Novo lançamento"
-        className="flex size-14 items-center justify-center rounded-full bg-brand text-on-brand shadow-sheet"
-      >
-        <Plus strokeWidth={2} className="size-6" aria-hidden />
-      </Link>
+      <NovoLancamentoButton variant="fab" />
       {TABS.slice(2).map(tab)}
     </nav>
   );

@@ -19,7 +19,15 @@ No Supabase, em Authentication → URL Configuration, inclua `http://localhost:3
 | `npm run tokens` | Regera `src/styles/tokens.css` a partir de `design-system/tokens.json` |
 | `npm run typecheck` | `tsc --noEmit` |
 | `npm test` | Vitest (unitários) |
-| `npm run test:e2e` | Playwright em desktop e 390px |
+| `npm run test:e2e` | Playwright em desktop e 390px. Os fluxos logados usam `E2E_EMAIL`/`E2E_PASSWORD` (um usuário do projeto de dev); sem eles, são pulados |
+
+Os testes de integração (`*.test.ts` em `src/server`) rodam contra o banco do `.env` e criam/apagam usuários próprios em `auth.users`; sem `DATABASE_URL`, são pulados.
+
+## Convenções de dados
+
+- **`amount` tem sinal do ponto de vista da conta**: despesa e transferência negativas, receita positiva (checks no banco).
+- **Saldo da conta é derivado** por trigger; nenhum handler escreve `current_balance`.
+- **RLS vale no Prisma**: todo acesso de request passa por `forUser(userId, tx => …)`, que roda a transação como `authenticated` com `auth.uid()` do usuário. O cliente `db` cru é só para migration, seed e testes.
 
 ## Decisões que divergem da especificação
 

@@ -34,9 +34,9 @@ describe("formatBRL", () => {
   });
 
   it("sem centavos, arredondando para o real mais próximo", () => {
-    expect(formatBRL(1240000n, { cents: false })).toBe(`R$${NBSP}12.400`);
-    expect(formatBRL(955349n, { cents: false })).toBe(`R$${NBSP}9.553`);
-    expect(formatBRL(955350n, { cents: false })).toBe(`R$${NBSP}9.554`);
+    expect(formatBRL(1240000n, { decimals: false })).toBe(`R$${NBSP}12.400`);
+    expect(formatBRL(955349n, { decimals: false })).toBe(`R$${NBSP}9.553`);
+    expect(formatBRL(955350n, { decimals: false })).toBe(`R$${NBSP}9.554`);
   });
 
   it("valor negativo sem sign não mostra sinal", () => {
