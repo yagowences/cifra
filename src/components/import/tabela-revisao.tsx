@@ -96,7 +96,7 @@ export function TabelaRevisao({ batchId, rows, categories, month }: Props) {
       </div>
 
       <div className="overflow-hidden rounded-lg border border-border-subtle bg-surface-raised">
-        <div className="hidden h-11 items-center gap-3 border-b border-border-subtle px-4 text-micro text-ink-muted uppercase lg:grid lg:grid-cols-[28px_88px_minmax(0,1fr)_130px_220px_120px]">
+        <div className="hidden h-11 items-center gap-3 border-b border-border-subtle px-4 text-micro text-ink-muted uppercase lg:grid lg:grid-cols-[28px_64px_minmax(0,1fr)_104px_168px_88px]">
           <input
             type="checkbox"
             aria-label="Selecionar todas"
@@ -122,7 +122,7 @@ export function TabelaRevisao({ batchId, rows, categories, month }: Props) {
               key={row.key}
               data-testid="linha-revisao"
               className={cn(
-                "grid grid-cols-[28px_minmax(0,1fr)_auto] items-center gap-x-3 gap-y-2 border-b border-border-subtle px-4 py-3 last:border-b-0 lg:min-h-[58px] lg:grid-cols-[28px_88px_minmax(0,1fr)_130px_220px_120px] lg:py-2",
+                "grid grid-cols-[28px_minmax(0,1fr)_auto] items-center gap-x-3 gap-y-2 border-b border-border-subtle px-4 py-3 last:border-b-0 lg:min-h-[58px] lg:grid-cols-[28px_64px_minmax(0,1fr)_104px_168px_88px] lg:py-2",
                 needsCategory && "bg-warning-soft",
                 isDup && "opacity-60",
               )}
