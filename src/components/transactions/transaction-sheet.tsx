@@ -1,6 +1,6 @@
 "use client";
 
-import { Copy, Trash2 } from "lucide-react";
+import { Copy, Repeat, Trash2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { toast } from "sonner";
@@ -9,6 +9,7 @@ import { Field, NativeSelect, TextInput } from "@/components/form";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { todayISO } from "@/lib/dates";
 import { formatBRL, parseBRL } from "@/lib/money";
+import { FREQUENCY_LABELS, type Frequency } from "@/lib/recurrence";
 import type { TransactionListItem } from "@/lib/transactions";
 import { cn } from "@/lib/utils";
 import {
@@ -16,6 +17,7 @@ import {
   duplicateTransactionAction,
   restoreTransactionAction,
   saveTransaction,
+  stopRecurrenceAction,
 } from "@/server/actions/transactions";
 import type { AccountOption, CategoryOption } from "./transaction-sheet-provider";
 
@@ -26,6 +28,8 @@ const TYPES: { value: TxType; label: string }[] = [
   { value: "INCOME", label: "Receita" },
   { value: "TRANSFER", label: "Transferência" },
 ];
+
+const INSTALLMENT_OPTIONS = [2, 3, 4, 5, 6, 8, 10, 12, 18, 24, 36, 48];
 
 type Props = {
   open: boolean;
@@ -44,6 +48,11 @@ type FormState = {
   competenceDate: string;
   description: string;
   notes: string;
+  /** Só na criação: "" | "1" (à vista) ou N parcelas; "" | frequência. */
+  installments: string;
+  recurrence: "" | Frequency;
+  /** Só ao editar parcela: aplicar nas futuras também. */
+  scope: "this" | "future";
 };
 
 function initialState(item: TransactionListItem | null, accounts: AccountOption[]): FormState {
@@ -57,6 +66,9 @@ function initialState(item: TransactionListItem | null, accounts: AccountOption[
       competenceDate: todayISO(),
       description: "",
       notes: "",
+      installments: "",
+      recurrence: "",
+      scope: "this",
     };
   }
   const magnitude = BigInt(item.amount) < 0n ? -BigInt(item.amount) : BigInt(item.amount);
@@ -69,6 +81,9 @@ function initialState(item: TransactionListItem | null, accounts: AccountOption[
     competenceDate: item.competenceDate,
     description: item.description,
     notes: item.notes ?? "",
+    installments: "",
+    recurrence: "",
+    scope: "this",
   };
 }
 
@@ -95,6 +110,14 @@ export function TransactionSheet({ open, item, accounts, categories, onClose }: 
 
   const amountCents = parseBRL(form.amountText);
   const isEdit = item !== null;
+  const isInstallment = Boolean(item?.installment);
+  const isRecurring = Boolean(item?.recurrenceId);
+
+  const finish = (message: string) => {
+    toast.success(message);
+    onClose();
+    router.refresh();
+  };
 
   const submit = () => {
     const cents = parseBRL(form.amountText);
@@ -115,14 +138,29 @@ export function TransactionSheet({ open, item, accounts, categories, onClose }: 
           description: form.description,
           notes: form.notes || null,
         },
+        options: isEdit
+          ? undefined
+          : {
+              installments: form.installments ? Number(form.installments) : undefined,
+              recurrence: form.recurrence || undefined,
+            },
+        scope: isEdit && isInstallment ? form.scope : undefined,
       });
       if (!result.ok) {
         setErrors(result.fieldErrors ?? { form: result.message });
         return;
       }
-      toast.success(isEdit ? "Lançamento atualizado" : "Lançamento salvo");
-      onClose();
-      router.refresh();
+      finish(
+        isEdit
+          ? form.scope === "future"
+            ? "Parcelas futuras atualizadas"
+            : "Lançamento atualizado"
+          : form.installments
+            ? `Parcelado em ${form.installments}x`
+            : form.recurrence
+              ? "Recorrência criada"
+              : "Lançamento salvo",
+      );
     });
   };
 
@@ -134,9 +172,19 @@ export function TransactionSheet({ open, item, accounts, categories, onClose }: 
         setErrors({ form: result.message });
         return;
       }
-      toast.success("Lançamento duplicado para hoje");
-      onClose();
-      router.refresh();
+      finish("Lançamento duplicado para hoje");
+    });
+  };
+
+  const stop = () => {
+    if (!item?.recurrenceId) return;
+    startTransition(async () => {
+      const result = await stopRecurrenceAction(item.recurrenceId!);
+      if (!result.ok) {
+        setErrors({ form: result.message });
+        return;
+      }
+      finish("Recorrência encerrada");
     });
   };
 
@@ -169,6 +217,8 @@ export function TransactionSheet({ open, item, accounts, categories, onClose }: 
     });
   };
 
+  const badge = isInstallment ? `Parcela ${item?.installment}` : isRecurring ? "Recorrente" : null;
+
   return (
     <Sheet open={open} onOpenChange={(next) => !next && onClose()}>
       <SheetContent
@@ -185,28 +235,38 @@ export function TransactionSheet({ open, item, accounts, categories, onClose }: 
           className="flex flex-col gap-4 px-4 pt-3 pb-[calc(16px+env(safe-area-inset-bottom))]"
         >
           <div className="mx-auto h-1 w-10 rounded-full bg-border-strong lg:hidden" aria-hidden />
-          <SheetTitle className="text-title">{isEdit ? "Editar lançamento" : "Novo lançamento"}</SheetTitle>
-
-          <div role="tablist" aria-label="Tipo" className="grid grid-cols-3 gap-1 rounded-md bg-surface-sunken p-1">
-            {TYPES.map((t) => (
-              <button
-                key={t.value}
-                type="button"
-                role="tab"
-                aria-selected={form.type === t.value}
-                onClick={() => set("type", t.value)}
-                className={cn(
-                  "h-9 rounded-sm text-caption font-medium transition-colors duration-150",
-                  form.type === t.value ? "bg-surface-raised text-ink-primary shadow-card" : "text-ink-secondary",
-                )}
-              >
-                {t.label}
-              </button>
-            ))}
+          <div className="flex items-center gap-2">
+            <SheetTitle className="text-title">{isEdit ? "Editar lançamento" : "Novo lançamento"}</SheetTitle>
+            {badge && (
+              <span className="inline-flex h-6 items-center gap-1 rounded-sm bg-brand-soft px-2 text-micro text-ink-primary uppercase">
+                {isRecurring && <Repeat size={12} strokeWidth={2} aria-hidden />}
+                {badge}
+              </span>
+            )}
           </div>
 
+          {!isEdit && (
+            <div role="tablist" aria-label="Tipo" className="grid grid-cols-3 gap-1 rounded-md bg-surface-sunken p-1">
+              {TYPES.map((t) => (
+                <button
+                  key={t.value}
+                  type="button"
+                  role="tab"
+                  aria-selected={form.type === t.value}
+                  onClick={() => set("type", t.value)}
+                  className={cn(
+                    "h-9 rounded-sm text-caption font-medium transition-colors duration-150",
+                    form.type === t.value ? "bg-surface-raised text-ink-primary shadow-card" : "text-ink-secondary",
+                  )}
+                >
+                  {t.label}
+                </button>
+              ))}
+            </div>
+          )}
+
           <label className="flex flex-col items-center gap-1 py-2">
-            <span className="text-micro text-ink-muted uppercase">Valor</span>
+            <span className="text-micro text-ink-muted uppercase">{isInstallment ? "Valor da parcela" : "Valor"}</span>
             <span className="flex items-baseline gap-2">
               <span className="text-amount-lg text-ink-secondary">R$</span>
               <input
@@ -222,6 +282,11 @@ export function TransactionSheet({ open, item, accounts, categories, onClose }: 
               />
             </span>
             {errors.amount && <span className="text-caption text-negative">{errors.amount}</span>}
+            {!isEdit && form.installments && amountCents !== null && amountCents > 0n && (
+              <span className="tabular text-caption text-ink-secondary">
+                {form.installments}x de {formatBRL(amountCents / BigInt(form.installments))} (aprox.)
+              </span>
+            )}
           </label>
 
           {form.type !== "TRANSFER" && (
@@ -238,7 +303,7 @@ export function TransactionSheet({ open, item, accounts, categories, onClose }: 
           )}
 
           <Field label={form.type === "TRANSFER" ? "De" : "Conta"} error={errors.accountId}>
-            <NativeSelect value={form.accountId} onChange={(e) => set("accountId", e.target.value)} required>
+            <NativeSelect value={form.accountId} onChange={(e) => set("accountId", e.target.value)} required disabled={isEdit && isInstallment}>
               {accounts.length === 0 && <option value="">Cadastre uma conta primeiro</option>}
               {accounts.map((a) => (
                 <option key={a.id} value={a.id}>
@@ -277,9 +342,59 @@ export function TransactionSheet({ open, item, accounts, categories, onClose }: 
             />
           </Field>
 
+          {!isEdit && (
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Parcelar" error={errors.installments}>
+                <NativeSelect
+                  value={form.installments}
+                  disabled={form.type === "TRANSFER" || Boolean(form.recurrence)}
+                  onChange={(e) => set("installments", e.target.value)}
+                >
+                  <option value="">À vista</option>
+                  {INSTALLMENT_OPTIONS.map((n) => (
+                    <option key={n} value={n}>
+                      {n}x
+                    </option>
+                  ))}
+                </NativeSelect>
+              </Field>
+              <Field label="Repetir" error={errors.recurrence}>
+                <NativeSelect
+                  value={form.recurrence}
+                  disabled={Boolean(form.installments)}
+                  onChange={(e) => set("recurrence", e.target.value as FormState["recurrence"])}
+                >
+                  <option value="">Não repete</option>
+                  {(Object.keys(FREQUENCY_LABELS) as Frequency[]).map((f) => (
+                    <option key={f} value={f}>
+                      {FREQUENCY_LABELS[f]}
+                    </option>
+                  ))}
+                </NativeSelect>
+              </Field>
+            </div>
+          )}
+
           <Field label="Observação" error={errors.notes}>
             <TextInput value={form.notes} onChange={(e) => set("notes", e.target.value)} placeholder="Opcional" maxLength={2000} />
           </Field>
+
+          {isEdit && isInstallment && (
+            <fieldset className="flex flex-col gap-2">
+              <legend className="text-caption text-ink-secondary">Aplicar a</legend>
+              {(
+                [
+                  ["this", "Só esta parcela"],
+                  ["future", `Esta e as futuras (de ${item?.installmentTotal ?? "?"})`],
+                ] as const
+              ).map(([value, label]) => (
+                <label key={value} className="flex h-11 items-center gap-3 rounded-md border border-border-strong px-3 text-body">
+                  <input type="radio" name="scope" value={value} checked={form.scope === value} onChange={() => set("scope", value)} className="accent-brand" />
+                  {label}
+                </label>
+              ))}
+            </fieldset>
+          )}
 
           {errors.form && (
             <p role="alert" className="rounded-md bg-negative-soft p-3 text-caption text-ink-primary">
@@ -288,10 +403,15 @@ export function TransactionSheet({ open, item, accounts, categories, onClose }: 
           )}
 
           {isEdit && (
-            <div className="grid grid-cols-2 gap-3">
+            <div className={cn("grid gap-3", isRecurring ? "grid-cols-3" : "grid-cols-2")}>
               <Botao type="button" onClick={duplicate} disabled={pending}>
                 <Copy strokeWidth={1.5} /> Duplicar
               </Botao>
+              {isRecurring && (
+                <Botao type="button" onClick={stop} disabled={pending}>
+                  <Repeat strokeWidth={1.5} /> Encerrar
+                </Botao>
+              )}
               <Botao type="button" variant="destrutivo" onClick={remove} disabled={pending}>
                 <Trash2 strokeWidth={1.5} /> Excluir
               </Botao>

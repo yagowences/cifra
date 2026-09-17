@@ -36,6 +36,17 @@ export const transactionInputSchema = z
 
 export type TransactionInput = z.infer<typeof transactionInputSchema>;
 
+/** Extras só na criação: parcelar em N vezes ou repetir com uma frequência. */
+export const transactionCreateOptionsSchema = z
+  .object({
+    installments: z.coerce.number().int().min(2).max(120).optional(),
+    recurrence: z.enum(["WEEKLY", "MONTHLY", "YEARLY"]).optional(),
+  })
+  .refine((v) => !(v.installments && v.recurrence), { message: "Escolha parcelar ou repetir, não os dois." });
+
+/** Escopo de uma edição de parcela: só esta ou esta e as futuras. */
+export const updateScopeSchema = z.enum(["this", "future"]).default("this");
+
 export const transactionFiltersSchema = z.object({
   /** "YYYY-MM"; padrão é o mês atual. */
   month: z.string().regex(/^\d{4}-\d{2}$/).optional(),

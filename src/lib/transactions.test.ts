@@ -18,7 +18,9 @@ const item = (over: Partial<TransactionListItem>): TransactionListItem => ({
   notes: null,
   reviewed: true,
   recurring: false,
+  recurrenceId: null,
   installment: null,
+  installmentTotal: null,
   attachments: 0,
   ...over,
 });
@@ -35,13 +37,14 @@ describe("groupByDay", () => {
     expect(groups[1].total).toBe(520000n);
   });
 
-  it("transferência e lançamento ignorado não entram no total do dia", () => {
+  it("transferência, ignorado e previsão não entram no total do dia", () => {
     const groups = groupByDay([
       item({ amount: "-4890" }),
       item({ amount: "-50000", type: "TRANSFER", transferAccountId: "b" }),
       item({ amount: "-999", status: "IGNORED" }),
+      item({ amount: "-777", status: "PROJECTED" }),
     ]);
-    expect(groups[0].items).toHaveLength(3);
+    expect(groups[0].items).toHaveLength(4);
     expect(groups[0].total).toBe(-4890n);
   });
 

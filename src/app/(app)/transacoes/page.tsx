@@ -7,12 +7,13 @@ import { PageHeader } from "@/components/page-header";
 import { FiltroChips } from "@/components/transactions/filtro-chips";
 import { ListaPorDia } from "@/components/transactions/lista-por-dia";
 import { NovoLancamentoButton } from "@/components/transactions/novo-lancamento-button";
-import { formatMonthYear, todayISO } from "@/lib/dates";
+import { formatMonthYear, monthPeriod, todayISO } from "@/lib/dates";
 import { requireUserId } from "@/server/auth";
 import { forUser } from "@/server/db";
 import { listTransactions } from "@/server/queries/transactions";
 import { transactionFiltersSchema } from "@/server/schemas/transaction";
 import { listAccounts } from "@/server/services/accounts";
+import { horizonFor, materializeRecurrences } from "@/server/services/recurrence";
 
 export const metadata: Metadata = { title: "Transações" };
 
@@ -37,10 +38,16 @@ export default async function TransacoesPage({ searchParams }: { searchParams: S
   const month = filters.month ?? today.slice(0, 7);
   const [year, m] = month.split("-").map(Number);
 
-  const { page, accounts } = await forUser(userId, async (tx) => ({
-    page: await listTransactions(tx, userId, filters),
-    accounts: await listAccounts(tx, userId),
-  }));
+  const { page, accounts } = await forUser(userId, async (tx) => {
+    // Recorrências viram linhas até o fim do mês exibido (ou do mês seguinte, o que for maior).
+    const horizon = horizonFor(today);
+    const shown = monthPeriod(year, m).end;
+    await materializeRecurrences(tx, userId, { until: shown > horizon ? shown : horizon, today });
+    return {
+      page: await listTransactions(tx, userId, filters),
+      accounts: await listAccounts(tx, userId),
+    };
+  });
 
   const accountOptions = accounts.map((a) => ({ id: a.id, name: a.name, type: a.type }));
   const filtered = Boolean(filters.accountId || filters.type || filters.q || filters.categoryId);

@@ -19,9 +19,15 @@ export type TransactionListItem = {
   notes: string | null;
   reviewed: boolean;
   recurring: boolean;
+  recurrenceId: string | null;
   installment: string | null;
+  installmentTotal: number | null;
   attachments: number;
 };
+
+/** Conta em receita/despesa: fora ficam transferência, ignorado e previsão ainda não efetivada. */
+export const isEffective = (item: Pick<TransactionListItem, "type" | "status">) =>
+  item.type !== "TRANSFER" && item.status !== "IGNORED" && item.status !== "PROJECTED";
 
 export type DayGroup = { date: ISODate; total: bigint; items: TransactionListItem[] };
 
@@ -38,7 +44,7 @@ export function groupByDay(items: TransactionListItem[]): DayGroup[] {
       groups.push(current);
     }
     current.items.push(item);
-    if (item.type !== "TRANSFER" && item.status !== "IGNORED") current.total += BigInt(item.amount);
+    if (isEffective(item)) current.total += BigInt(item.amount);
   }
   return groups;
 }

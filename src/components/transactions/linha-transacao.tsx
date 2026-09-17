@@ -15,13 +15,17 @@ export function LinhaTransacao({ item, onClick }: Props) {
     ? `${item.accountName} → ${item.transferAccountName ?? "?"}`
     : [item.accountName, item.category?.name ?? "Sem categoria"].join(" · ");
   const needsReview = !item.reviewed;
+  const projected = item.status === "PROJECTED";
 
   return (
     <button
       type="button"
       onClick={() => onClick?.(item)}
       data-testid="linha-transacao"
-      className="flex h-16 w-full items-center gap-3 border-t border-border-subtle px-4 text-left transition-colors duration-150 hover:bg-surface-raised"
+      className={cn(
+        "flex h-16 w-full items-center gap-3 border-t border-border-subtle px-4 text-left transition-colors duration-150 hover:bg-surface-raised",
+        projected && "opacity-60",
+      )}
     >
       {isTransfer ? (
         <span
@@ -45,7 +49,7 @@ export function LinhaTransacao({ item, onClick }: Props) {
           {needsReview && <span aria-label="Precisa de revisão" className="size-1.5 shrink-0 rounded-full bg-warning" />}
         </span>
         <span className={cn("block truncate text-caption", needsReview ? "text-warning" : "text-ink-secondary")}>
-          {needsReview ? "Precisa de revisão" : context}
+          {needsReview ? "Precisa de revisão" : projected ? `Previsto · ${context}` : context}
         </span>
       </span>
 

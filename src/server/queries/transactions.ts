@@ -63,7 +63,9 @@ export async function listTransactions(tx: UserDb, userId: string, filters: Tran
       notes: r.notes,
       reviewed: r.reviewed,
       recurring: r.recurrenceId !== null,
+      recurrenceId: r.recurrenceId,
       installment: r.installmentNo && r.installmentTotal ? `${r.installmentNo}/${r.installmentTotal}` : null,
+      installmentTotal: r.installmentTotal,
       attachments: r._count.attachments,
     })),
   };
