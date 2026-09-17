@@ -102,7 +102,8 @@ export async function takeMonthlySnapshot(tx: UserDb, userId: string, today: ISO
   return written;
 }
 
-export type NetWorthPoint = { month: string; net: bigint };
+/** `net` nulo = mês anterior à primeira foto: o gráfico não desenha ponto. */
+export type NetWorthPoint = { month: string; net: bigint | null };
 
 /** Série mensal do patrimônio líquido, lida dos snapshots (12 pontos terminando em `endMonth`). */
 export async function getNetWorthHistory(tx: UserDb, userId: string, endMonth: string, months = 12): Promise<NetWorthPoint[]> {
@@ -117,12 +118,14 @@ export async function getNetWorthHistory(tx: UserDb, userId: string, endMonth: s
     group by 1
   `;
   const byMonth = new Map(rows.map((r) => [r.month, BigInt(r.net)]));
-  return Array.from({ length: months }, (_, i) => {
+  const points: NetWorthPoint[] = [];
+  let seen = false;
+  for (let i = 0; i < months; i++) {
     const month = addMonths(`${endMonth}-01`, i - (months - 1)).slice(0, 7);
-    return { month, net: byMonth.get(month) ?? 0n };
-  }).map((p, i, arr) => {
-    // Mês sem foto herda o anterior: a linha não cai a zero por falta de dado.
-    if (!byMonth.has(p.month) && i > 0) return { ...p, net: arr[i - 1].net };
-    return p;
-  });
+    const value = byMonth.get(month);
+    if (value !== undefined) seen = true;
+    // Antes da primeira foto não há ponto; depois, mês sem foto herda o anterior (a linha não cai a zero por falta de dado).
+    points.push({ month, net: value ?? (seen ? points[i - 1].net : null) });
+  }
+  return points;
 }

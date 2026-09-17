@@ -58,7 +58,7 @@ describe.skipIf(!hasDb)("patrimônio", () => {
 
     const history = await forUser(userId, (tx) => getNetWorthHistory(tx, userId, "2026-09", 3));
     expect(history.map((h) => h.month)).toEqual(["2026-07", "2026-08", "2026-09"]);
-    expect(history[0].net).toBe(0n);
+    expect(history[0].net).toBeNull();
     expect(history[1].net).toBe(3_902_045n);
     expect(history[2].net).toBe(4_902_045n);
   });

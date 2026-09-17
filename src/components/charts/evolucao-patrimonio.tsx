@@ -3,7 +3,8 @@
 import { Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis, type TooltipProps } from "recharts";
 import { formatBRL } from "@/lib/money";
 
-export type EvolucaoPoint = { month: string; net: string };
+/** `net` nulo = sem foto naquele mês: a linha começa na primeira foto. */
+export type EvolucaoPoint = { month: string; net: string | null };
 
 const MONTHS = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"];
 const label = (month: string) => `${MONTHS[Number(month.slice(5, 7)) - 1]}${month.slice(5, 7) === "01" ? `/${month.slice(2, 4)}` : ""}`;
@@ -14,11 +15,11 @@ const tick = (v: number) => {
   return v < 0 ? `−${text}` : text;
 };
 
-type Row = { month: string; net: number; netCents: bigint };
+type Row = { month: string; net: number | null; netCents: bigint | null };
 
 function EvolucaoTooltip({ active, payload }: TooltipProps<number, string>) {
   const row = payload?.[0]?.payload as Row | undefined;
-  if (!active || !row) return null;
+  if (!active || !row || row.netCents === null) return null;
   return (
     <div className="rounded-md border border-border-subtle bg-surface-raised px-3 py-2 text-caption shadow-card">
       <p className="text-micro text-ink-muted uppercase">{label(row.month)}</p>
@@ -29,7 +30,7 @@ function EvolucaoTooltip({ active, payload }: TooltipProps<number, string>) {
 
 /** Patrimônio líquido mês a mês, lido dos snapshots. Linha de 2px, marcadores de 8px, sem área. */
 export function EvolucaoPatrimonio({ points }: { points: EvolucaoPoint[] }) {
-  const rows: Row[] = points.map((p) => ({ month: p.month, net: Number(BigInt(p.net)) / 100, netCents: BigInt(p.net) }));
+  const rows: Row[] = points.map((p) => ({ month: p.month, net: p.net === null ? null : Number(BigInt(p.net)) / 100, netCents: p.net === null ? null : BigInt(p.net) }));
   return (
     <figure>
       <div className="h-52 w-full" role="img" aria-label="Evolução do patrimônio líquido nos últimos doze meses">
@@ -50,7 +51,7 @@ export function EvolucaoPatrimonio({ points }: { points: EvolucaoPoint[] }) {
           </LineChart>
         </ResponsiveContainer>
       </div>
-      <figcaption className="sr-only">{rows.map((r) => `${label(r.month)}: ${formatBRL(r.netCents)}`).join("; ")}</figcaption>
+      <figcaption className="sr-only">{rows.filter((r) => r.netCents !== null).map((r) => `${label(r.month)}: ${formatBRL(r.netCents!)}`).join("; ")}</figcaption>
     </figure>
   );
 }

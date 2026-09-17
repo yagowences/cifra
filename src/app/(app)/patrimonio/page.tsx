@@ -24,15 +24,15 @@ export default async function PatrimonioPage() {
     };
   });
 
-  const first = history[0];
+  const first = history.find((h) => h.net !== null);
   const data: PatrimonioData = {
     net: position.net.toString(),
     assetsTotal: position.assetsTotal.toString(),
     liabilitiesTotal: position.liabilitiesTotal.toString(),
-    variation12m: first && first.net !== 0n ? percentChange(first.net, position.net) : null,
+    variation12m: first && first.net && first.net !== 0n && first.month !== history[history.length - 1].month ? percentChange(first.net, position.net) : null,
     byClass: position.byClass.map((c) => ({ class: c.class, total: c.total.toString(), percent: percentOf(c.total, position.assetsTotal) })),
     liabilities: position.liabilities.map((l) => ({ ...l, value: l.value.toString() })),
-    history: history.map((h) => ({ month: h.month, net: h.net.toString() })),
+    history: history.map((h) => ({ month: h.month, net: h.net === null ? null : h.net.toString() })),
     assets: assets.map<AssetListItem>((a) => ({ id: a.id, name: a.name, class: a.class, currentValue: a.currentValue.toString(), isLiability: a.isLiability })),
   };
 
