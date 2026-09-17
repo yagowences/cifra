@@ -23,6 +23,15 @@ No Supabase, em Authentication → URL Configuration, inclua `http://localhost:3
 
 Os testes de integração (`*.test.ts` em `src/server`) rodam contra o banco do `.env` e criam/apagam usuários próprios em `auth.users`; sem `DATABASE_URL`, são pulados.
 
+## Importação
+
+Upload direto do navegador para o bucket privado `cifra-uploads` (RLS por pasta `<user_id>/…`). `startImport` cria o lote e dispara o processamento:
+
+- **Com `INNGEST_EVENT_KEY`:** evento `import/batch.created` → função `process-import` (rota `/api/inngest`), que lê o arquivo com `SUPABASE_SERVICE_ROLE_KEY`. Em dev, rode `npx inngest-cli@latest dev` para receber os eventos.
+- **Sem a chave:** o processamento roda logo após a resposta (`after()`), no próprio servidor, com a sessão do usuário.
+
+Pipeline: parser determinístico (OFX, CSV com mapeador) → dedup em 3 níveis (identificador do banco → fingerprint → fuzzy ±3 dias) → conciliação com previsões → sugestão de categoria pela memória de comerciante → validação de saldo (OFX) → revisão. Confirmar cria tudo numa transação só; desfazer remove o que o lote criou.
+
 ## Convenções de dados
 
 - **`amount` tem sinal do ponto de vista da conta**: despesa e transferência negativas, receita positiva (checks no banco).

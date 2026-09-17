@@ -81,6 +81,7 @@ enum ImportFormat {
 enum ImportStatus {
   PENDING
   PROCESSING
+  NEEDS_MAPPING
   READY_FOR_REVIEW
   CONFIRMED
   UNDONE
