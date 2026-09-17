@@ -11,7 +11,7 @@ import { cn } from "@/lib/utils";
 import { startImportAction } from "@/server/actions/import";
 import type { AccountOption } from "@/components/transactions/transaction-sheet-provider";
 
-const ACCEPT = ".ofx,.qfx,.csv,.txt";
+const ACCEPT = ".ofx,.qfx,.csv,.txt,.pdf";
 
 /** Envio de extrato: escolhe a conta, solta o arquivo, e a revisão abre em seguida. */
 export function Dropzone({ accounts, userId }: { accounts: AccountOption[]; userId: string }) {
@@ -89,7 +89,7 @@ export function Dropzone({ accounts, userId }: { accounts: AccountOption[]; user
         ) : (
           <>
             <span className="text-body-strong">Solte o extrato aqui ou toque para escolher</span>
-            <span className="text-caption text-ink-secondary">OFX ou CSV do seu banco. PDF chega em breve.</span>
+            <span className="text-caption text-ink-secondary">OFX, CSV ou PDF do seu banco. PDF é lido por IA e conferido pelo saldo.</span>
           </>
         )}
       </label>

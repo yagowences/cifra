@@ -9,8 +9,9 @@ import { NativeSelect } from "@/components/form";
 import type { CategoryOption } from "@/components/transactions/transaction-sheet-provider";
 import { formatShortDate } from "@/lib/dates";
 import { cn } from "@/lib/utils";
+import { SeloConfianca } from "@/components/selo-confianca";
 import { confirmImportAction } from "@/server/actions/import";
-import type { ReviewRow, RowStatus } from "@/server/services/import/types";
+import { isLowConfidence, type ReviewRow, type RowStatus } from "@/server/services/import/types";
 
 type Filter = RowStatus | "all";
 
@@ -31,7 +32,10 @@ type Props = { batchId: string; rows: ReviewRow[]; categories: CategoryOption[];
 export function TabelaRevisao({ batchId, rows, categories, month }: Props) {
   const router = useRouter();
   const [filter, setFilter] = useState<Filter>("all");
-  const [selected, setSelected] = useState<Set<string>>(() => new Set(rows.filter((r) => r.status === "new" || r.status === "matched").map((r) => r.key)));
+  // Novas e casadas vêm marcadas; linha de baixa confiança fica de fora até a pessoa conferir.
+  const [selected, setSelected] = useState<Set<string>>(
+    () => new Set(rows.filter((r) => (r.status === "new" || r.status === "matched") && !isLowConfidence(r)).map((r) => r.key)),
+  );
   const [categoryOf, setCategoryOf] = useState<Record<string, string>>(() =>
     Object.fromEntries(rows.filter((r) => r.suggestedCategoryId).map((r) => [r.key, r.suggestedCategoryId!])),
   );
@@ -116,7 +120,9 @@ export function TabelaRevisao({ batchId, rows, categories, month }: Props) {
         {visible.map((row) => {
           const isDup = row.status === "duplicate";
           const checked = selected.has(row.key);
-          const needsCategory = checked && !categoryOf[row.key] && row.status !== "matched";
+          const lowConfidence = isLowConfidence(row);
+          const needsCategory = (checked && !categoryOf[row.key] && row.status !== "matched") || lowConfidence;
+          const minConfidence = row.fieldConfidence ? Math.min(row.fieldConfidence.date, row.fieldConfidence.amount, row.fieldConfidence.description) : null;
           return (
             <div
               key={row.key}
@@ -165,7 +171,13 @@ export function TabelaRevisao({ batchId, rows, categories, month }: Props) {
                 )}
               </span>
               <span className={cn("hidden text-right text-caption lg:block", row.status === "new" ? "text-ink-secondary" : row.status === "duplicate" ? "text-ink-muted" : "text-warning")}>
-                {row.confidence !== null && row.status === "new" ? `${Math.round(row.confidence * 100)}%` : STATUS_LABEL[row.status].replace("Possíveis duplicatas", "Possível duplicata").replace("Casadas", "Casada").replace("Duplicatas", "Duplicata")}
+                {row.status === "new" && minConfidence !== null ? (
+                  <SeloConfianca value={minConfidence} />
+                ) : row.confidence !== null && row.status === "new" ? (
+                  `${Math.round(row.confidence * 100)}%`
+                ) : (
+                  STATUS_LABEL[row.status].replace("Possíveis duplicatas", "Possível duplicata").replace("Casadas", "Casada").replace("Duplicatas", "Duplicata")
+                )}
               </span>
             </div>
           );

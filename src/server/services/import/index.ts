@@ -5,9 +5,11 @@ import { addDays, fromISODate, toISODate } from "@/lib/dates";
 import { fingerprint, normalizeDescription } from "@/lib/fingerprint";
 import { db, forUser, type UserDb } from "@/server/db";
 import { NotFoundError } from "@/server/services/transactions";
+import { createAiClient, type AiClient, type BankHint } from "@/ai/client";
 import { dedupeRows, type ExistingTx } from "./dedupe";
 import { parseCsv, previewCsv } from "./parsers/csv";
 import { decodeOfx, parseOfx } from "./parsers/ofx";
+import { parsePdf } from "./parsers/pdf";
 import { csvMappingSchema, reviewRowSchema, type CsvMapping, type ParseResult, type ReviewRow } from "./types";
 
 export class ImportError extends Error {
@@ -53,16 +55,21 @@ export async function startImport(tx: UserDb, userId: string, input: StartImport
   });
 }
 
-/** Leitura determinística por formato; PDF/XLSX ficam para as tarefas seguintes. */
-function parseFile(format: ImportFormat, bytes: Uint8Array, mapping: CsvMapping | null): { result: ParseResult | null; needsMapping: boolean; preview?: ReturnType<typeof previewCsv> } {
+export type ProcessDeps = { ai?: AiClient };
+
+type ParseContext = { mapping: CsvMapping | null; userId: string; hint: BankHint; ai: () => AiClient };
+
+/** Leitura por formato: OFX e CSV determinísticos; PDF pelo modelo (texto redigido ou imagem). XLSX fica para depois. */
+async function parseFile(format: ImportFormat, bytes: Uint8Array, ctx: ParseContext): Promise<{ result: ParseResult | null; needsMapping: boolean; preview?: ReturnType<typeof previewCsv> }> {
   if (format === "OFX") return { result: parseOfx(decodeOfx(bytes)), needsMapping: false };
   if (format === "CSV") {
     const text = new TextDecoder("utf-8", { fatal: false }).decode(bytes);
     const preview = previewCsv(text);
-    const effective = mapping ?? preview.guess;
+    const effective = ctx.mapping ?? preview.guess;
     if (!effective) return { result: null, needsMapping: true, preview };
     return { result: parseCsv(text, effective), needsMapping: false, preview };
   }
+  if (format === "PDF") return { result: await parsePdf(bytes, { ai: ctx.ai(), userId: ctx.userId, hint: ctx.hint }), needsMapping: false };
   throw new ImportError(`Formato ${format} ainda não é suportado nesta versão.`);
 }
 
@@ -71,15 +78,20 @@ function parseFile(format: ImportFormat, bytes: Uint8Array, mapping: CsvMapping 
  * sugestão de categoria pela memória de comerciante → validação de saldo →
  * READY_FOR_REVIEW (ou NEEDS_MAPPING para CSV irreconhecível). Nunca cria transação.
  */
-export async function processImportBatch(batchId: string, bytes: Uint8Array, mapping: CsvMapping | null = null) {
-  const batch = await db.importBatch.findUnique({ where: { id: batchId } });
+export async function processImportBatch(batchId: string, bytes: Uint8Array, mapping: CsvMapping | null = null, deps: ProcessDeps = {}) {
+  const batch = await db.importBatch.findUnique({ where: { id: batchId }, include: { account: { select: { type: true, institution: true } } } });
   if (!batch) throw new NotFoundError("Lote");
   const userId = batch.userId;
 
   await db.importBatch.update({ where: { id: batchId }, data: { status: "PROCESSING", error: null } });
 
   try {
-    const parsed = parseFile(batch.format, bytes, mapping);
+    const parsed = await parseFile(batch.format, bytes, {
+      mapping,
+      userId,
+      hint: { accountType: batch.account.type, institution: batch.account.institution },
+      ai: () => deps.ai ?? createAiClient(),
+    });
     if (parsed.needsMapping || !parsed.result) {
       await db.importBatch.update({
         where: { id: batchId },
@@ -87,7 +99,7 @@ export async function processImportBatch(batchId: string, bytes: Uint8Array, map
       });
       return;
     }
-    const { rows: parsedRows, declaredClosingBalance, declaredClosingDate, warnings } = parsed.result;
+    const { rows: parsedRows, declaredClosingBalance, declaredOpeningBalance = null, warnings, fieldConfidence, aiCostCents = 0 } = parsed.result;
 
     const reviewRows = await forUser(userId, async (tx) => {
       const dates = parsedRows.map((r) => r.date).sort();
@@ -118,28 +130,41 @@ export async function processImportBatch(batchId: string, bytes: Uint8Array, map
       });
     });
 
-    // Validação de saldo: o que a conta tem hoje mais o que entra deve bater com o saldo declarado.
+    // Confiança por campo (leitura por IA) acompanha a linha; a dedup preserva a ordem do arquivo.
+    const rowsWithConfidence = fieldConfidence
+      ? reviewRows.map((r, i) => (fieldConfidence[i] ? { ...r, fieldConfidence: fieldConfidence[i] } : r))
+      : reviewRows;
+
+    // Validação de saldo, obrigatória e em código, nunca no modelo:
+    // com abertura e fechamento declarados, abertura + soma dos lançamentos = fechamento;
+    // só com fechamento, o saldo atual da conta mais o que entra deve bater com ele.
     let balanceDiff: bigint | null = null;
     if (declaredClosingBalance !== null) {
-      const account = await db.account.findUniqueOrThrow({ where: { id: batch.accountId } });
-      const incoming = reviewRows.filter((r) => r.status === "new" || r.status === "matched").reduce((s, r) => s + BigInt(r.amount), 0n);
-      balanceDiff = declaredClosingBalance - (account.currentBalance + incoming);
+      if (declaredOpeningBalance !== null) {
+        const total = parsedRows.reduce((s, r) => s + BigInt(r.amount), 0n);
+        balanceDiff = declaredClosingBalance - (declaredOpeningBalance + total);
+      } else {
+        const account = await db.account.findUniqueOrThrow({ where: { id: batch.accountId } });
+        const incoming = reviewRows.filter((r) => r.status === "new" || r.status === "matched").reduce((s, r) => s + BigInt(r.amount), 0n);
+        balanceDiff = declaredClosingBalance - (account.currentBalance + incoming);
+      }
     }
 
     await db.importBatch.update({
       where: { id: batchId },
       data: {
         status: "READY_FOR_REVIEW",
-        rows: reviewRows,
+        rows: rowsWithConfidence,
         columnMapping: mapping ?? (parsed.preview?.guess ? parsed.preview.guess : Prisma.JsonNull),
         readCount: parsedRows.length,
         duplicateCount: reviewRows.filter((r) => r.status === "duplicate").length,
         errorCount: warnings.length,
+        declaredOpeningBalance,
         declaredClosingBalance,
         balanceDiff,
+        aiCostCents: Math.ceil(aiCostCents),
         error: warnings.length ? warnings.slice(0, 20).join("\n") : null,
         parserVersion: `${batch.format.toLowerCase()}-1`,
-        ...(declaredClosingDate ? {} : {}),
       },
     });
   } catch (e) {

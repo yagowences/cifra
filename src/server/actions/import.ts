@@ -39,7 +39,7 @@ export async function startImportAction(payload: unknown): Promise<ActionResult<
   const { accountId, storageKey, fileName } = parsed.data;
   if (!storageKey.startsWith(`${userId}/`)) return { ok: false, message: "Arquivo fora da sua pasta." };
   const format = formatFromName(fileName);
-  if (!format || (format !== "OFX" && format !== "CSV")) return { ok: false, message: "Por enquanto, importe OFX ou CSV." };
+  if (!format || format === "XLSX") return { ok: false, message: "Importe OFX, CSV ou PDF." };
 
   try {
     const bytes = await downloadAsUser(storageKey);

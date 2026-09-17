@@ -30,7 +30,9 @@ Upload direto do navegador para o bucket privado `cifra-uploads` (RLS por pasta 
 - **Com `INNGEST_EVENT_KEY`:** evento `import/batch.created` → função `process-import` (rota `/api/inngest`), que lê o arquivo com `SUPABASE_SERVICE_ROLE_KEY`. Em dev, rode `npx inngest-cli@latest dev` para receber os eventos.
 - **Sem a chave:** o processamento roda logo após a resposta (`after()`), no próprio servidor, com a sessão do usuário.
 
-Pipeline: parser determinístico (OFX, CSV com mapeador) → dedup em 3 níveis (identificador do banco → fingerprint → fuzzy ±3 dias) → conciliação com previsões → sugestão de categoria pela memória de comerciante → validação de saldo (OFX) → revisão. Confirmar cria tudo numa transação só; desfazer remove o que o lote criou.
+PDF é lido pelo modelo (`ai/client.ts`, exige `ANTHROPIC_API_KEY`): com camada de texto, o texto vai redigido de PII; sem ela, o PDF vai como documento ao modelo visual. A validação de saldo roda em código (abertura + soma = fechamento); linha com confiança abaixo de 0,80 fica destacada e fora da seleção padrão.
+
+Pipeline: parser determinístico (OFX, CSV com mapeador) ou IA (PDF) → dedup em 3 níveis (identificador do banco → fingerprint → fuzzy ±3 dias) → conciliação com previsões → sugestão de categoria pela memória de comerciante → validação de saldo (OFX) → revisão. Confirmar cria tudo numa transação só; desfazer remove o que o lote criou.
 
 ## Convenções de dados
 

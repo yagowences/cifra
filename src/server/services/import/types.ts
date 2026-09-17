@@ -21,8 +21,14 @@ export type ParseResult = {
   /** Saldo final declarado (centavos) e data, quando o arquivo traz. */
   declaredClosingBalance: bigint | null;
   declaredClosingDate: string | null;
+  /** Saldo inicial declarado (centavos); com ele, a validação é fechada: abertura + soma = fechamento. */
+  declaredOpeningBalance?: bigint | null;
   /** Avisos não fatais (linhas puladas, páginas ilegíveis). */
   warnings: string[];
+  /** Confiança por campo, por linha, quando a leitura foi por IA. */
+  fieldConfidence?: Array<{ date: number; amount: number; description: number }>;
+  /** Custo da leitura por IA em centavos de dólar. */
+  aiCostCents?: number;
 };
 
 export const rowStatusSchema = z.enum(["new", "duplicate", "possible_duplicate", "matched"]);
@@ -39,7 +45,13 @@ export const reviewRowSchema = parsedRowSchema.extend({
   suggestedCategoryId: z.string().nullable(),
   /** 0–1; null quando não houve sugestão. */
   confidence: z.number().min(0).max(1).nullable(),
+  /** Confiança por campo quando a leitura foi por IA (PDF); ausente em OFX/CSV. */
+  fieldConfidence: z.object({ date: z.number(), amount: z.number(), description: z.number() }).optional(),
 });
+
+/** Linha lida por IA com algum campo abaixo de 0,80: destacada e fora da seleção padrão. */
+export const isLowConfidence = (row: { fieldConfidence?: { date: number; amount: number; description: number } }) =>
+  Boolean(row.fieldConfidence && Object.values(row.fieldConfidence).some((c) => c < 0.8));
 
 export type ReviewRow = z.infer<typeof reviewRowSchema>;
 
