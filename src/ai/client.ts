@@ -89,26 +89,36 @@ type JsonTask<T> = {
   cacheInput: string;
 };
 
+/** Rate limit por minuto e orçamento mensal por usuário; lança antes de gastar token. */
+export async function assertAiAllowed(userId: string, opts: { ratePerMinute?: number; now?: Date } = {}) {
+  const current = opts.now ?? new Date();
+  const ratePerMinute = opts.ratePerMinute ?? RATE_PER_MINUTE;
+  const minuteAgo = new Date(current.getTime() - 60_000);
+  const recent = await db.aiUsageLog.count({ where: { userId, createdAt: { gte: minuteAgo } } });
+  if (recent >= ratePerMinute) throw new RateLimitedError();
+
+  const monthStart = new Date(Date.UTC(current.getUTCFullYear(), current.getUTCMonth(), 1));
+  const spent = await db.aiUsageLog.aggregate({ where: { userId, createdAt: { gte: monthStart } }, _sum: { costCents: true } });
+  const spentCents = spent._sum.costCents ?? 0;
+  const budget = monthlyBudgetCents();
+  if (spentCents >= budget) {
+    console.warn(`[ai] usuário ${userId} passou do orçamento: ${spentCents}/${budget} centavos`);
+    throw new BudgetExceededError(spentCents, budget);
+  }
+}
+
+export type UsageEntry = { userId: string; task: string; model: string; inputTokens: number; outputTokens: number; costCents: number; latencyMs: number; success: boolean; error: string | null };
+
+export function logAiUsage(entry: UsageEntry) {
+  return db.aiUsageLog.create({ data: entry });
+}
+
 export function createAiClient(opts: AiClientOptions = {}): AiClient {
   const provider = opts.provider ?? new AnthropicProvider();
   const ratePerMinute = opts.ratePerMinute ?? RATE_PER_MINUTE;
   const now = opts.now ?? (() => new Date());
 
-  async function guard(userId: string) {
-    const current = now();
-    const minuteAgo = new Date(current.getTime() - 60_000);
-    const recent = await db.aiUsageLog.count({ where: { userId, createdAt: { gte: minuteAgo } } });
-    if (recent >= ratePerMinute) throw new RateLimitedError();
-
-    const monthStart = new Date(Date.UTC(current.getUTCFullYear(), current.getUTCMonth(), 1));
-    const spent = await db.aiUsageLog.aggregate({ where: { userId, createdAt: { gte: monthStart } }, _sum: { costCents: true } });
-    const spentCents = spent._sum.costCents ?? 0;
-    const budget = monthlyBudgetCents();
-    if (spentCents >= budget) {
-      console.warn(`[ai] usuário ${userId} passou do orçamento: ${spentCents}/${budget} centavos`);
-      throw new BudgetExceededError(spentCents, budget);
-    }
-  }
+  const guard = (userId: string) => assertAiAllowed(userId, { ratePerMinute, now: now() });
 
   /**
    * Núcleo: cache → chamada → JSON → Zod. Saída inválida faz um retry com o
