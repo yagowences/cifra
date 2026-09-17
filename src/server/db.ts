@@ -22,8 +22,12 @@ export async function forUser<T>(userId: string, fn: (tx: UserDb) => Promise<T>)
   if (!/^[0-9a-f-]{36}$/i.test(userId)) throw new Error("userId inválido");
   const claims = JSON.stringify({ sub: userId, role: "authenticated" });
 
-  return db.$transaction(async (tx) => {
-    await tx.$executeRaw`select set_config('request.jwt.claims', ${claims}, true), set_config('role', 'authenticated', true)`;
-    return fn(tx);
-  });
+  return db.$transaction(
+    async (tx) => {
+      await tx.$executeRaw`select set_config('request.jwt.claims', ${claims}, true), set_config('role', 'authenticated', true)`;
+      return fn(tx);
+    },
+    // Confirmar um lote grande ou gerar recorrências passa fácil dos 5 s padrão.
+    { maxWait: 10_000, timeout: 60_000 },
+  );
 }

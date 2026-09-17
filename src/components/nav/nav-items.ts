@@ -1,4 +1,4 @@
-import { House, Landmark, MessageSquare, Receipt, Rows3, Target, Upload, Wallet, type LucideIcon } from "lucide-react";
+import { House, Landmark, ListChecks, MessageSquare, Receipt, Rows3, Target, Upload, Wallet, type LucideIcon } from "lucide-react";
 
 export type NavItem = { href: string; label: string; icon: LucideIcon };
 
@@ -10,6 +10,7 @@ export const NAV_ITEMS: NavItem[] = [
   { href: "/comprovante", label: "Comprovante", icon: Receipt },
   { href: "/patrimonio", label: "Patrimônio", icon: Landmark },
   { href: "/metas", label: "Metas", icon: Target },
+  { href: "/regras", label: "Regras", icon: ListChecks },
   { href: "/assistente", label: "Assistente", icon: MessageSquare },
 ];
 

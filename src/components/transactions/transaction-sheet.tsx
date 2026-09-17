@@ -12,6 +12,7 @@ import { formatBRL, parseBRL } from "@/lib/money";
 import { FREQUENCY_LABELS, type Frequency } from "@/lib/recurrence";
 import type { TransactionListItem } from "@/lib/transactions";
 import { cn } from "@/lib/utils";
+import { createRuleAction, ruleSuggestionAction, suggestCategoryAction, type CategorySuggestion } from "@/server/actions/categorize";
 import {
   deleteTransactionAction,
   duplicateTransactionAction,
@@ -103,6 +104,25 @@ export function TransactionSheet({ open, item, accounts, categories, onClose }: 
 
   const set = <K extends keyof FormState>(key: K, value: FormState[K]) => setForm((f) => ({ ...f, [key]: value }));
 
+  // Categoria sugerida pela cascata barata (regra → memória → histórico) enquanto a pessoa digita.
+  const [suggestion, setSuggestion] = useState<CategorySuggestion>(null);
+  const [categoryTouched, setCategoryTouched] = useState(false);
+  useEffect(() => {
+    if (!open || item || form.type === "TRANSFER" || form.description.trim().length < 3) {
+      setSuggestion(null);
+      return;
+    }
+    const handle = setTimeout(async () => {
+      const found = await suggestCategoryAction(form.description, form.type === "INCOME" ? "INCOME" : "EXPENSE");
+      setSuggestion(found);
+      if (found && !categoryTouched) setForm((f) => (f.categoryId ? f : { ...f, categoryId: found.categoryId }));
+    }, 350);
+    return () => clearTimeout(handle);
+  }, [open, item, form.type, form.description, categoryTouched]);
+  useEffect(() => {
+    if (open) setCategoryTouched(false);
+  }, [open]);
+
   const visibleCategories = useMemo(
     () => categories.filter((c) => c.type === (form.type === "INCOME" ? "INCOME" : "EXPENSE")),
     [categories, form.type],
@@ -149,6 +169,23 @@ export function TransactionSheet({ open, item, accounts, categories, onClose }: 
       if (!result.ok) {
         setErrors(result.fieldErrors ?? { form: result.message });
         return;
+      }
+      // Correção repetida três vezes: propor virar regra explícita.
+      if (isEdit && form.categoryId && form.categoryId !== (item?.category?.id ?? "")) {
+        const rule = await ruleSuggestionAction(form.description);
+        if (rule) {
+          toast(`“${rule.normalizedDesc}” já foi ${rule.categoryName} três vezes`, {
+            description: "Quer criar uma regra para categorizar sozinho?",
+            duration: 8000,
+            action: {
+              label: "Criar regra",
+              onClick: async () => {
+                const created = await createRuleAction({ name: `${rule.normalizedDesc} → ${rule.categoryName}`, conditions: { descriptionContains: [rule.normalizedDesc] }, categoryId: rule.categoryId });
+                toast[created.ok ? "success" : "error"](created.ok ? "Regra criada" : created.message);
+              },
+            },
+          });
+        }
       }
       finish(
         isEdit
@@ -290,8 +327,25 @@ export function TransactionSheet({ open, item, accounts, categories, onClose }: 
           </label>
 
           {form.type !== "TRANSFER" && (
-            <Field label="Categoria" error={errors.categoryId}>
-              <NativeSelect value={form.categoryId} onChange={(e) => set("categoryId", e.target.value)}>
+            <Field
+              label={
+                suggestion && form.categoryId === suggestion.categoryId ? (
+                  <>
+                    Categoria <span className="ml-1 rounded-xs bg-brand-soft px-1.5 py-0.5 text-micro text-ink-primary uppercase">Sugerido</span>
+                  </>
+                ) : (
+                  "Categoria"
+                )
+              }
+              error={errors.categoryId}
+            >
+              <NativeSelect
+                value={form.categoryId}
+                onChange={(e) => {
+                  setCategoryTouched(true);
+                  set("categoryId", e.target.value);
+                }}
+              >
                 <option value="">Sem categoria</option>
                 {visibleCategories.map((c) => (
                   <option key={c.id} value={c.id}>

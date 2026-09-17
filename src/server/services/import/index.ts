@@ -4,6 +4,7 @@ import { Prisma, type ImportFormat } from "@prisma/client";
 import { addDays, fromISODate, toISODate } from "@/lib/dates";
 import { fingerprint, normalizeDescription } from "@/lib/fingerprint";
 import { db, forUser, type UserDb } from "@/server/db";
+import { categorizeCascade } from "@/server/services/categorize";
 import { NotFoundError } from "@/server/services/transactions";
 import { createAiClient, type AiClient, type BankHint } from "@/ai/client";
 import { dedupeRows, type ExistingTx } from "./dedupe";
@@ -118,15 +119,19 @@ export async function processImportBatch(batchId: string, bytes: Uint8Array, map
 
       const deduped = dedupeRows(parsedRows, existing, { accountId: batch.accountId });
 
-      // Categorização, nível 2: esta descrição já foi categorizada por este usuário.
-      const keys = Array.from(new Set(deduped.map((r) => normalizeDescription(r.description)).filter(Boolean)));
-      const memory = keys.length
-        ? await tx.merchantMemory.findMany({ where: { userId, normalizedDesc: { in: keys } }, select: { normalizedDesc: true, categoryId: true, hitCount: true } })
-        : [];
-      const byDesc = new Map(memory.map((m) => [m.normalizedDesc, m]));
+      // Categorização em cascata (regra → memória → vizinhos → LLM só com chave configurada).
+      const candidates = deduped.filter((r) => r.status !== "duplicate");
+      const ai = process.env.ANTHROPIC_API_KEY ? (deps.ai ?? createAiClient()) : (deps.ai ?? null);
+      const results = await categorizeCascade(
+        tx,
+        userId,
+        candidates.map((r, index) => ({ index, description: r.description, amount: r.amount, date: r.date })),
+        { ai },
+      );
+      const byKey = new Map(candidates.map((r, index) => [r.key, results[index]]));
       return deduped.map((r) => {
-        const hit = byDesc.get(normalizeDescription(r.description));
-        return hit ? { ...r, suggestedCategoryId: hit.categoryId, confidence: hit.hitCount >= 3 ? 0.95 : 0.85 } : r;
+        const hit = byKey.get(r.key);
+        return hit?.categoryId ? { ...r, suggestedCategoryId: hit.categoryId, confidence: hit.confidence } : r;
       });
     });
 

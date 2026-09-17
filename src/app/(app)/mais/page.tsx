@@ -7,7 +7,7 @@ import { signOut } from "@/server/actions/auth";
 
 export const metadata: Metadata = { title: "Mais" };
 
-const SECONDARY = new Set(["/contas", "/importar", "/comprovante", "/patrimonio", "/assistente"]);
+const SECONDARY = new Set(["/contas", "/importar", "/comprovante", "/patrimonio", "/regras", "/assistente"]);
 
 export default function MaisPage() {
   return (

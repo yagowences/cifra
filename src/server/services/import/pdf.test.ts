@@ -51,8 +51,8 @@ class FakeAi implements AiClient {
   extractReceipt(): never {
     throw new Error("não usado");
   }
-  categorize(): never {
-    throw new Error("não usado");
+  async categorize(): Promise<Extracted<{ results: [] }>> {
+    return { data: { results: [] }, model: "fake", costCents: 0, cached: false };
   }
 }
 
@@ -138,9 +138,7 @@ describe.skipIf(!hasDb)("importação de PDF", () => {
       extractReceipt: async () => {
         throw new Error("não usado");
       },
-      categorize: async () => {
-        throw new Error("não usado");
-      },
+      categorize: async () => ({ data: { results: [] }, model: "fake", costCents: 0, cached: false }),
     };
     const bytes = minimalPdf("ilegivel");
     const batch = await forUser(userId, (tx) => startImport(tx, userId, { accountId, fileName: "ruim.pdf", storageKey: `${userId}/imports/c.pdf`, format: "PDF", bytes }));

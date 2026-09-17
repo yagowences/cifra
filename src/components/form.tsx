@@ -4,7 +4,7 @@ import { cn } from "@/lib/utils";
 const control =
   "h-11 w-full rounded-md border border-border-strong bg-surface-sunken px-3 text-body text-ink-primary placeholder:text-ink-muted aria-invalid:border-negative";
 
-export function Field({ label, error, children }: { label: string; error?: string; children: ReactNode }) {
+export function Field({ label, error, children }: { label: ReactNode; error?: string; children: ReactNode }) {
   return (
     <label className="flex flex-col gap-2">
       <span className="text-caption text-ink-secondary">{label}</span>
