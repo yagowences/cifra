@@ -15,8 +15,12 @@ const safeName = (name: string) =>
  * A RLS do storage só aceita caminhos que começam com o próprio id.
  */
 export async function uploadImportFile(file: File, userId: string): Promise<string> {
+  return uploadUserFile(file, userId, "imports");
+}
+
+export async function uploadUserFile(file: File, userId: string, folder: "imports" | "receipts"): Promise<string> {
   if (file.size > MAX_UPLOAD_BYTES) throw new Error("Arquivo maior que 20 MB.");
-  const key = `${userId}/imports/${crypto.randomUUID()}-${safeName(file.name)}`;
+  const key = `${userId}/${folder}/${crypto.randomUUID()}-${safeName(file.name || "foto.jpg")}`;
   const supabase = createClient();
   const { error } = await supabase.storage.from(UPLOADS_BUCKET).upload(key, file, { upsert: false, contentType: file.type || "application/octet-stream" });
   if (error) throw new Error(`Falha no envio: ${error.message}`);
