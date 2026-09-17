@@ -22,5 +22,7 @@ export default defineConfig({
     environment: "node",
     testTimeout: 30_000,
     hookTimeout: 30_000,
+    // Os testes de integração compartilham o pooler do Supabase; em paralelo, estouram conexões.
+    fileParallelism: false,
   },
 });

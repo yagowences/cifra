@@ -17,7 +17,8 @@ export async function listTransactions(tx: UserDb, userId: string, filters: Tran
     userId,
     competenceDate: { gte: fromISODate(period.start), lte: fromISODate(period.end) },
     ...(filters.accountId && { OR: [{ accountId: filters.accountId }, { transferAccountId: filters.accountId }] }),
-    ...(filters.categoryId && { categoryId: filters.categoryId }),
+    // "nenhuma" é o link da barra "Sem categoria" do dashboard.
+    ...(filters.categoryId && { categoryId: filters.categoryId === "nenhuma" ? null : filters.categoryId }),
     ...(filters.type && { type: filters.type }),
     ...(filters.q && { description: { contains: filters.q, mode: "insensitive" } }),
     ...((filters.minAmount !== undefined || filters.maxAmount !== undefined) && {
