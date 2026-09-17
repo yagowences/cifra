@@ -1,4 +1,6 @@
-// Schema do Cifra. Os modelos entram na tarefa 2 (ver especificação, seção 4).
+// Schema do Cifra. Identificadores em snake_case no banco (mapeados aqui),
+// dinheiro em centavos como BigInt, e toda tabela com user_id sob RLS
+// (ver prisma/migrations/*_rls_triggers_seed/migration.sql).
 
 generator client {
   provider = "prisma-client-js"
@@ -8,4 +10,520 @@ datasource db {
   provider  = "postgresql"
   url       = env("DATABASE_URL")
   directUrl = env("DIRECT_URL")
+}
+
+enum AccountType {
+  CHECKING
+  SAVINGS
+  CREDIT_CARD
+  CASH
+  INVESTMENT
+  OTHER
+
+  @@map("account_type")
+}
+
+enum CategoryType {
+  INCOME
+  EXPENSE
+
+  @@map("category_type")
+}
+
+enum TxType {
+  INCOME
+  EXPENSE
+  TRANSFER
+
+  @@map("tx_type")
+}
+
+enum TxStatus {
+  PENDING
+  CONFIRMED
+  RECONCILED
+  PROJECTED
+  IGNORED
+
+  @@map("tx_status")
+}
+
+enum TxSource {
+  MANUAL
+  IMPORT
+  OCR
+  RECURRENCE
+  RULE
+  API
+
+  @@map("tx_source")
+}
+
+enum AttachmentKind {
+  RECEIPT
+  INVOICE
+  STATEMENT
+  OTHER
+
+  @@map("attachment_kind")
+}
+
+enum ImportFormat {
+  OFX
+  CSV
+  XLSX
+  PDF
+  TXT
+
+  @@map("import_format")
+}
+
+enum ImportStatus {
+  PENDING
+  PROCESSING
+  READY_FOR_REVIEW
+  CONFIRMED
+  UNDONE
+  FAILED
+
+  @@map("import_status")
+}
+
+enum GoalType {
+  EMERGENCY_FUND
+  TARGET_AMOUNT
+  RECURRING_CONTRIBUTION
+  SPENDING_REDUCTION
+  FREE
+
+  @@map("goal_type")
+}
+
+enum GoalStatus {
+  ACTIVE
+  REACHED
+  PAUSED
+  ARCHIVED
+
+  @@map("goal_status")
+}
+
+enum AssetClass {
+  CASH
+  FIXED_INCOME
+  VARIABLE_INCOME
+  REAL_ESTATE
+  CRYPTO
+  VEHICLE
+  OTHER
+
+  @@map("asset_class")
+}
+
+enum InsightSeverity {
+  INFO
+  ATTENTION
+
+  @@map("insight_severity")
+}
+
+enum AuditAction {
+  CREATE
+  UPDATE
+  DELETE
+  SPLIT
+  UNDO_IMPORT
+
+  @@map("audit_action")
+}
+
+/// Perfil do usuário; a identidade vive em auth.users (id igual).
+model User {
+  id          String   @id @db.Uuid
+  email       String
+  name        String?
+  currency    String   @default("BRL")
+  timezone    String   @default("America/Sao_Paulo")
+  plan        String   @default("free")
+  preferences Json     @default("{}")
+  aiConsent   Boolean  @default(false) @map("ai_consent")
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  accounts        Account[]
+  categories      Category[]
+  transactions    Transaction[]
+  tags            Tag[]
+  transactionTags TransactionTag[]
+  attachments     Attachment[]
+  importBatches   ImportBatch[]
+  recurrenceRules RecurrenceRule[]
+  goals           Goal[]
+  assets          Asset[]
+  snapshots       NetWorthSnapshot[]
+  automationRules AutomationRule[]
+  merchantMemory  MerchantMemory[]
+  insights        Insight[]
+  aiUsageLogs     AiUsageLog[]
+  auditLogs       AuditLog[]
+
+  @@map("profiles")
+}
+
+model Account {
+  id             String      @id @default(cuid())
+  userId         String      @map("user_id") @db.Uuid
+  name           String
+  type           AccountType
+  institution    String?
+  /// Centavos. current_balance é derivado por trigger: initial + soma das transações.
+  initialBalance BigInt      @default(0) @map("initial_balance")
+  currentBalance BigInt      @default(0) @map("current_balance")
+  closingDay     Int?        @map("closing_day")
+  dueDay         Int?        @map("due_day")
+  creditLimit    BigInt?     @map("credit_limit")
+  archived       Boolean     @default(false)
+  createdAt      DateTime    @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime    @updatedAt @map("updated_at") @db.Timestamptz
+
+  user          User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  transactions  Transaction[] @relation("AccountTransactions")
+  transfersIn   Transaction[] @relation("TransferTarget")
+  importBatches ImportBatch[]
+  goals         Goal[]
+
+  @@index([userId, archived])
+  @@map("accounts")
+}
+
+model Category {
+  id        String       @id @default(cuid())
+  userId    String       @map("user_id") @db.Uuid
+  name      String
+  /// Nome do ícone (lucide) e chave de cor do Design System (brand, chart-2…), nunca hexadecimal.
+  icon      String
+  color     String
+  type      CategoryType
+  parentId  String?      @map("parent_id")
+  isSystem  Boolean      @default(false) @map("is_system")
+  sortOrder Int          @default(0) @map("sort_order")
+  createdAt DateTime     @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime     @updatedAt @map("updated_at") @db.Timestamptz
+
+  user           User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  parent         Category?        @relation("CategoryTree", fields: [parentId], references: [id], onDelete: SetNull)
+  children       Category[]       @relation("CategoryTree")
+  transactions   Transaction[]
+  merchantMemory MerchantMemory[]
+
+  @@index([userId, type, parentId])
+  @@index([parentId])
+  @@map("categories")
+}
+
+model Transaction {
+  id                String    @id @default(cuid())
+  userId            String    @map("user_id") @db.Uuid
+  accountId         String    @map("account_id")
+  categoryId        String?   @map("category_id")
+  /// Centavos, com sinal do ponto de vista da conta: despesa e transferência < 0, receita > 0.
+  amount            BigInt
+  type              TxType
+  competenceDate    DateTime  @map("competence_date") @db.Date
+  cashDate          DateTime? @map("cash_date") @db.Date
+  description       String
+  /// Descrição original do banco: imutável depois de criada.
+  originalDesc      String?   @map("original_desc")
+  merchant          String?
+  status            TxStatus  @default(CONFIRMED)
+  source            TxSource  @default(MANUAL)
+  /// SHA-256 de accountId|competenceDate|amount|normalize(description).
+  fingerprint       String
+  externalId        String?   @map("external_id")
+  parentId          String?   @map("parent_id")
+  installmentNo     Int?      @map("installment_no")
+  installmentTotal  Int?      @map("installment_total")
+  recurrenceId      String?   @map("recurrence_id")
+  importBatchId     String?   @map("import_batch_id")
+  transferAccountId String?   @map("transfer_account_id")
+  aiConfidence      Float?    @map("ai_confidence")
+  notes             String?
+  reviewed          Boolean   @default(true)
+  createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt         DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+
+  user            User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  account         Account          @relation("AccountTransactions", fields: [accountId], references: [id], onDelete: Restrict)
+  transferAccount Account?         @relation("TransferTarget", fields: [transferAccountId], references: [id], onDelete: Restrict)
+  category        Category?        @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  parent          Transaction?     @relation("Installments", fields: [parentId], references: [id], onDelete: Cascade)
+  children        Transaction[]    @relation("Installments")
+  recurrence      RecurrenceRule?  @relation(fields: [recurrenceId], references: [id], onDelete: SetNull)
+  importBatch     ImportBatch?     @relation(fields: [importBatchId], references: [id], onDelete: SetNull)
+  attachments     Attachment[]
+  tags            TransactionTag[]
+
+  @@unique([userId, fingerprint])
+  @@index([userId, competenceDate])
+  @@index([userId, categoryId, competenceDate])
+  @@index([accountId, competenceDate])
+  @@index([categoryId])
+  @@index([transferAccountId])
+  @@index([parentId])
+  @@index([recurrenceId])
+  @@index([importBatchId])
+  @@index([userId, externalId])
+  @@map("transactions")
+}
+
+model Tag {
+  id        String   @id @default(cuid())
+  userId    String   @map("user_id") @db.Uuid
+  name      String
+  color     String?
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  user         User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  transactions TransactionTag[]
+
+  @@unique([userId, name])
+  @@map("tags")
+}
+
+model TransactionTag {
+  transactionId String @map("transaction_id")
+  tagId         String @map("tag_id")
+  userId        String @map("user_id") @db.Uuid
+
+  transaction Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  tag         Tag         @relation(fields: [tagId], references: [id], onDelete: Cascade)
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([transactionId, tagId])
+  @@index([tagId])
+  @@index([userId])
+  @@map("transaction_tags")
+}
+
+model Attachment {
+  id            String         @id @default(cuid())
+  userId        String         @map("user_id") @db.Uuid
+  transactionId String         @map("transaction_id")
+  storageKey    String         @map("storage_key")
+  mimeType      String         @map("mime_type")
+  sizeBytes     Int            @map("size_bytes")
+  kind          AttachmentKind @default(RECEIPT)
+  ocrData       Json?          @map("ocr_data")
+  createdAt     DateTime       @default(now()) @map("created_at") @db.Timestamptz
+
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  transaction Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+
+  @@index([transactionId])
+  @@index([userId])
+  @@map("attachments")
+}
+
+model ImportBatch {
+  id                     String       @id @default(cuid())
+  userId                 String       @map("user_id") @db.Uuid
+  accountId              String       @map("account_id")
+  fileName               String       @map("file_name")
+  storageKey             String       @map("storage_key")
+  /// SHA-256 do arquivo: reprocessar o mesmo conteúdo não gasta token.
+  contentHash            String       @map("content_hash")
+  format                 ImportFormat
+  status                 ImportStatus @default(PENDING)
+  readCount              Int          @default(0) @map("read_count")
+  createdCount           Int          @default(0) @map("created_count")
+  duplicateCount         Int          @default(0) @map("duplicate_count")
+  errorCount             Int          @default(0) @map("error_count")
+  /// Saldo declarado no extrato (centavos) e diferença apurada na validação.
+  declaredOpeningBalance BigInt?      @map("declared_opening_balance")
+  declaredClosingBalance BigInt?      @map("declared_closing_balance")
+  balanceDiff            BigInt?      @map("balance_diff")
+  /// Lançamentos extraídos aguardando revisão (antes de virarem transações).
+  rows                   Json?
+  columnMapping          Json?        @map("column_mapping")
+  parserVersion          String?      @map("parser_version")
+  aiCostCents            Int          @default(0) @map("ai_cost_cents")
+  error                  String?
+  createdAt              DateTime     @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt              DateTime     @updatedAt @map("updated_at") @db.Timestamptz
+
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  account      Account       @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  transactions Transaction[]
+
+  @@index([userId, createdAt])
+  @@index([accountId])
+  @@map("import_batches")
+}
+
+model RecurrenceRule {
+  id             String   @id @default(cuid())
+  userId         String   @map("user_id") @db.Uuid
+  /// Campos da transação-modelo (conta, valor, tipo, categoria, descrição).
+  template       Json
+  rrule          String
+  nextOccurrence DateTime @map("next_occurrence") @db.Date
+  active         Boolean  @default(true)
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  transactions Transaction[]
+
+  @@index([userId, active, nextOccurrence])
+  @@map("recurrence_rules")
+}
+
+model Goal {
+  id            String     @id @default(cuid())
+  userId        String     @map("user_id") @db.Uuid
+  name          String
+  type          GoalType
+  targetAmount  BigInt     @map("target_amount")
+  currentAmount BigInt     @default(0) @map("current_amount")
+  deadline      DateTime?  @db.Date
+  accountId     String?    @map("account_id")
+  status        GoalStatus @default(ACTIVE)
+  icon          String?
+  createdAt     DateTime   @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt     DateTime   @updatedAt @map("updated_at") @db.Timestamptz
+
+  user    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  account Account? @relation(fields: [accountId], references: [id], onDelete: SetNull)
+
+  @@index([userId, status])
+  @@index([accountId])
+  @@map("goals")
+}
+
+model Asset {
+  id           String     @id @default(cuid())
+  userId       String     @map("user_id") @db.Uuid
+  name         String
+  class        AssetClass
+  currentValue BigInt     @map("current_value")
+  currency     String     @default("BRL")
+  updateSource String     @default("manual") @map("update_source")
+  metadata     Json       @default("{}")
+  isLiability  Boolean    @default(false) @map("is_liability")
+  archived     Boolean    @default(false)
+  createdAt    DateTime   @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt    DateTime   @updatedAt @map("updated_at") @db.Timestamptz
+
+  user      User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  snapshots NetWorthSnapshot[]
+
+  @@index([userId, archived])
+  @@map("assets")
+}
+
+model NetWorthSnapshot {
+  id      String   @id @default(cuid())
+  userId  String   @map("user_id") @db.Uuid
+  assetId String   @map("asset_id")
+  date    DateTime @db.Date
+  value   BigInt
+
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  asset Asset @relation(fields: [assetId], references: [id], onDelete: Cascade)
+
+  @@unique([assetId, date])
+  @@index([userId, date])
+  @@map("net_worth_snapshots")
+}
+
+model AutomationRule {
+  id         String   @id @default(cuid())
+  userId     String   @map("user_id") @db.Uuid
+  name       String
+  conditions Json
+  actions    Json
+  priority   Int      @default(100)
+  active     Boolean  @default(true)
+  hitCount   Int      @default(0) @map("hit_count")
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt  DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, active, priority])
+  @@map("automation_rules")
+}
+
+/// Memória de categorização: esta descrição normalizada já foi categorizada por este usuário.
+/// O embedding (pgvector) entra na tarefa 11.
+model MerchantMemory {
+  id             String   @id @default(cuid())
+  userId         String   @map("user_id") @db.Uuid
+  normalizedDesc String   @map("normalized_desc")
+  categoryId     String   @map("category_id")
+  hitCount       Int      @default(1) @map("hit_count")
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  category Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, normalizedDesc])
+  @@index([categoryId])
+  @@map("merchant_memory")
+}
+
+model Insight {
+  id          String          @id @default(cuid())
+  userId      String          @map("user_id") @db.Uuid
+  type        String
+  severity    InsightSeverity @default(INFO)
+  title       String
+  body        String
+  /// Números calculados por query determinística; o texto nunca traz número do modelo.
+  data        Json
+  periodStart DateTime        @map("period_start") @db.Date
+  periodEnd   DateTime        @map("period_end") @db.Date
+  read        Boolean         @default(false)
+  dismissed   Boolean         @default(false)
+  createdAt   DateTime        @default(now()) @map("created_at") @db.Timestamptz
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, dismissed, createdAt])
+  @@map("insights")
+}
+
+model AiUsageLog {
+  id           String   @id @default(cuid())
+  userId       String   @map("user_id") @db.Uuid
+  task         String
+  model        String
+  inputTokens  Int      @map("input_tokens")
+  outputTokens Int      @map("output_tokens")
+  costCents    Int      @map("cost_cents")
+  latencyMs    Int      @map("latency_ms")
+  success      Boolean
+  error        String?
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@map("ai_usage_logs")
+}
+
+model AuditLog {
+  id        String      @id @default(cuid())
+  userId    String      @map("user_id") @db.Uuid
+  entity    String
+  entityId  String      @map("entity_id")
+  action    AuditAction
+  source    TxSource
+  diff      Json?
+  createdAt DateTime    @default(now()) @map("created_at") @db.Timestamptz
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, entity, entityId])
+  @@map("audit_logs")
 }
