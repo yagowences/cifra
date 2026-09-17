@@ -6,7 +6,9 @@ import { db } from "@/server/db";
 import { costCents, monthlyBudgetCents } from "./cost";
 import { MODELS } from "./models";
 import type { LlmProvider, ProviderContent } from "./provider";
+import { AI_PROVIDER } from "./models";
 import { AnthropicProvider } from "./providers/anthropic";
+import { GeminiProvider } from "./providers/gemini";
 import { redactPII } from "./redact";
 import { categorizedSchema, type Categorized } from "./schemas/categorize";
 import { receiptSchema, type Receipt } from "./schemas/receipt";
@@ -114,7 +116,7 @@ export function logAiUsage(entry: UsageEntry) {
 }
 
 export function createAiClient(opts: AiClientOptions = {}): AiClient {
-  const provider = opts.provider ?? new AnthropicProvider();
+  const provider = opts.provider ?? (AI_PROVIDER === "anthropic" ? new AnthropicProvider() : new GeminiProvider());
   const ratePerMinute = opts.ratePerMinute ?? RATE_PER_MINUTE;
   const now = opts.now ?? (() => new Date());
 

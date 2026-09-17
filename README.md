@@ -30,7 +30,20 @@ Upload direto do navegador para o bucket privado `cifra-uploads` (RLS por pasta 
 - **Com `INNGEST_EVENT_KEY`:** evento `import/batch.created` → função `process-import` (rota `/api/inngest`), que lê o arquivo com `SUPABASE_SERVICE_ROLE_KEY`. Em dev, rode `npx inngest-cli@latest dev` para receber os eventos.
 - **Sem a chave:** o processamento roda logo após a resposta (`after()`), no próprio servidor, com a sessão do usuário.
 
-PDF é lido pelo modelo (`ai/client.ts`, exige `ANTHROPIC_API_KEY`): com camada de texto, o texto vai redigido de PII; sem ela, o PDF vai como documento ao modelo visual. A validação de saldo roda em código (abertura + soma = fechamento); linha com confiança abaixo de 0,80 fica destacada e fora da seleção padrão.
+PDF é lido pelo modelo (`ai/client.ts`, exige a chave do provedor ativo — ver seção IA abaixo): com camada de texto, o texto vai redigido de PII; sem ela, o PDF vai como documento ao modelo visual. A validação de saldo roda em código (abertura + soma = fechamento); linha com confiança abaixo de 0,80 fica destacada e fora da seleção padrão.
+
+## Camada de IA
+
+`ai/client.ts` é o único ponto que fala com o provedor, atrás da interface `LlmProvider` (`ai/provider.ts`). Dois provedores implementados, escolhidos por `AI_PROVIDER`:
+
+| | `AI_PROVIDER=gemini` (padrão) | `AI_PROVIDER=anthropic` |
+| --- | --- | --- |
+| Chave | `GOOGLE_API_KEY` — gratuita em [aistudio.google.com/apikey](https://aistudio.google.com/apikey), sem cartão | `ANTHROPIC_API_KEY` (mais `ANTHROPIC_WORKSPACE_ID` se a chave for de organização) |
+| Extração/categorização/assistente | `gemini-flash-latest` | `claude-sonnet-5` |
+| Tarefas simples | `gemini-flash-lite-latest` | `claude-haiku-4-5` |
+| Custo no free tier | R$ 0 (só limite de requisições) | pago por chamada |
+
+Sobrescreve por tarefa com `AI_MODEL_EXTRACT`, `AI_MODEL_CATEGORIZE`, `AI_MODEL_SIMPLE`, `AI_MODEL_ANSWER`, independente do provedor. O assistente (`ai/assistant.ts`) tem sua própria interface `ChatModel`, porque o loop de tool calling foi escrito contra o formato de mensagens da Anthropic; `providers/gemini-chat.ts` traduz esse formato para a API do Gemini e de volta — é a única borda que muda por provedor, o loop (`executeTool`, histórico, links) é o mesmo.
 
 Pipeline: parser determinístico (OFX, CSV com mapeador) ou IA (PDF) → dedup em 3 níveis (identificador do banco → fingerprint → fuzzy ±3 dias) → conciliação com previsões → sugestão de categoria pela memória de comerciante → validação de saldo (OFX) → revisão. Confirmar cria tudo numa transação só; desfazer remove o que o lote criou.
 
@@ -53,6 +66,7 @@ Fora da fase 1, como a spec pede: multi-moeda, compartilhamento, app nativo, or�
 - **Tailwind v4.** O mapeamento de `tailwind.config.ts` da spec vive em `@theme` dentro do CSS gerado; os nomes de classe são os mesmos (`bg-surface-raised`, `text-ink-secondary`, `bg-brand`, `text-brand-on`).
 - **Design tokens são gerados, não copiados.** Mudou o `tokens.json` do Design System, rode `npm run tokens`; um teste falha se o CSS versionado estiver desatualizado.
 - **Primeira parcela é o registro-pai** (a spec dizia "pai + N filhos"): evita contar o total duas vezes nos agregados.
-- **Nível 3 da categorização usa `pg_trgm`** (vizinhos por trigramas e palavras) no lugar de embeddings + pgvector: a Anthropic não oferece embeddings e isso evitaria um segundo provedor. Trocável.
+- **Nível 3 da categorização usa `pg_trgm`** (vizinhos por trigramas e palavras) no lugar de embeddings + pgvector, para não depender de um provedor de embeddings específico. Trocável.
+- **Provedor de IA é Gemini por padrão**, não Anthropic como a especificação original previa: `AI_PROVIDER=gemini` usa o free tier do Google AI Studio (sem cartão). A Anthropic continua implementada e disponível via `AI_PROVIDER=anthropic`.
 - **Texto dos insights sai de template**, com os números das queries; o modelo não redige (não há como ele inventar número). Se quiser a redação pelo modelo, o lugar é `lib/insights.ts`, mantendo os números como placeholders.
 - **Recorrência é materializada ao abrir o mês**, sem fila; a fila Inngest existe só para importação.

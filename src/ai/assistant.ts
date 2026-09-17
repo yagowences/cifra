@@ -9,8 +9,9 @@ import { listTransactions } from "@/server/queries/transactions";
 import { getNetWorth } from "@/server/services/networth";
 import { assertAiAllowed, logAiUsage } from "./client";
 import { costCents } from "./cost";
-import { MODELS } from "./models";
+import { AI_PROVIDER, MODELS } from "./models";
 import { ProviderUnavailableError } from "./providers/anthropic";
+import { GeminiChatModel } from "./providers/gemini-chat";
 
 /**
  * Assistente: o modelo nunca calcula e nunca vê o banco inteiro. Ele escolhe
@@ -27,7 +28,12 @@ export class AnthropicChatModel implements ChatModel {
   private client: Anthropic | null = null;
   create(params: Anthropic.MessageCreateParamsNonStreaming) {
     if (!process.env.ANTHROPIC_API_KEY) throw new ProviderUnavailableError("ANTHROPIC_API_KEY ausente: o assistente está desligado.");
-    this.client ??= new Anthropic({ maxRetries: 2, timeout: 60_000 });
+    const workspaceId = process.env.ANTHROPIC_WORKSPACE_ID;
+    this.client ??= new Anthropic({
+      maxRetries: 2,
+      timeout: 60_000,
+      ...(workspaceId ? { defaultHeaders: { "anthropic-workspace-id": workspaceId } } : {}),
+    });
     return this.client.messages.create(params);
   }
 }
@@ -207,7 +213,7 @@ export async function answerQuestion(
   input: { userId: string; question: string; history?: ChatTurn[]; today?: ISODate },
   deps: { model?: ChatModel; modelId?: string } = {},
 ): Promise<Answer> {
-  const model = deps.model ?? new AnthropicChatModel();
+  const model = deps.model ?? (AI_PROVIDER === "anthropic" ? new AnthropicChatModel() : new GeminiChatModel());
   const modelId = deps.modelId ?? MODELS.answer;
   const today = input.today ?? todayISO();
   await assertAiAllowed(input.userId);

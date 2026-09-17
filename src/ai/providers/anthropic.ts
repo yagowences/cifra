@@ -1,13 +1,9 @@
 import "server-only";
 import Anthropic from "@anthropic-ai/sdk";
 import type { LlmProvider, ProviderContent, ProviderRequest, ProviderResponse } from "../provider";
+import { ProviderUnavailableError } from "./errors";
 
-export class ProviderUnavailableError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "ProviderUnavailableError";
-  }
-}
+export { ProviderUnavailableError };
 
 function toBlock(c: ProviderContent): Anthropic.ContentBlockParam {
   if (c.type === "text") return { type: "text", text: c.text };
@@ -23,7 +19,13 @@ export class AnthropicProvider implements LlmProvider {
     if (!process.env.ANTHROPIC_API_KEY) {
       throw new ProviderUnavailableError("ANTHROPIC_API_KEY ausente: a extração por IA está desligada.");
     }
-    this.client ??= new Anthropic({ maxRetries: 2, timeout: 120_000 });
+    // Chave de organização (não de um workspace específico) exige este header.
+    const workspaceId = process.env.ANTHROPIC_WORKSPACE_ID;
+    this.client ??= new Anthropic({
+      maxRetries: 2,
+      timeout: 120_000,
+      ...(workspaceId ? { defaultHeaders: { "anthropic-workspace-id": workspaceId } } : {}),
+    });
     return this.client;
   }
 

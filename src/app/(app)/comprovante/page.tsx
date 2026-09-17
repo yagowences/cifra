@@ -5,6 +5,7 @@ import { PageHeader } from "@/components/page-header";
 import { LeitorComprovante } from "@/components/receipts/leitor-comprovante";
 import { requireUserId } from "@/server/auth";
 import { forUser } from "@/server/db";
+import { aiEnabled } from "@/ai/models";
 import { listAccounts } from "@/server/services/accounts";
 
 export const metadata: Metadata = { title: "Comprovante" };
@@ -19,18 +20,18 @@ export default async function ComprovantePage() {
       select: { id: true, name: true, type: true, icon: true, color: true },
     }),
   }));
-  const aiEnabled = Boolean(process.env.ANTHROPIC_API_KEY);
+  const enabled = aiEnabled();
 
   return (
     <>
       <PageHeader title="Comprovante" />
       {accounts.length === 0 ? (
         <EmptyState icon={Receipt} title="Comece por uma conta" description="Cadastre a conta ou o cartão em que o gasto saiu." action={{ href: "/contas", label: "Cadastrar conta" }} />
-      ) : !aiEnabled ? (
+      ) : !enabled ? (
         <EmptyState
           icon={Receipt}
           title="Leitura por IA desligada"
-          description="Defina ANTHROPIC_API_KEY no servidor para fotografar comprovantes. Enquanto isso, lance à mão pelo botão +."
+          description="Configure a chave de IA no servidor (ver .env.example) para fotografar comprovantes. Enquanto isso, lance à mão pelo botão +."
         />
       ) : (
         <LeitorComprovante accounts={accounts.map((a) => ({ id: a.id, name: a.name, type: a.type }))} categories={categories} userId={userId} />

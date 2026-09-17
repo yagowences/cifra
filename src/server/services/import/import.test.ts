@@ -57,7 +57,7 @@ describe.skipIf(!hasDb)("pipeline de importação", () => {
 
   it("primeira importação: 2 novas, 1 casada com a previsão, saldo confere", async () => {
     const batch = await forUser(userId, (tx) => startImport(tx, userId, { accountId, fileName: "extrato.ofx", storageKey: `${userId}/imports/x.ofx`, format: "OFX", bytes }));
-    await processImportBatch(batch.id, bytes);
+    await processImportBatch(batch.id, bytes, null, { ai: null });
 
     const after = await db.importBatch.findUniqueOrThrow({ where: { id: batch.id } });
     expect(after.status).toBe("READY_FOR_REVIEW");
@@ -82,7 +82,7 @@ describe.skipIf(!hasDb)("pipeline de importação", () => {
 
   it("importar o mesmo arquivo de novo não cria duplicata", async () => {
     const batch = await forUser(userId, (tx) => startImport(tx, userId, { accountId, fileName: "extrato.ofx", storageKey: `${userId}/imports/y.ofx`, format: "OFX", bytes }));
-    await processImportBatch(batch.id, bytes);
+    await processImportBatch(batch.id, bytes, null, { ai: null });
     const rows = readReviewRows(await db.importBatch.findUniqueOrThrow({ where: { id: batch.id } }));
     expect(rows.every((r) => r.status === "duplicate")).toBe(true);
     expect(rows.map((r) => r.matchReason)).toEqual(Array(3).fill("Mesmo identificador do banco"));

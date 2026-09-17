@@ -6,6 +6,7 @@ import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { db } from "@/server/db";
 import { BudgetExceededError, createAiClient, extractJson, ManualReviewError, RateLimitedError } from "./client";
+import { MODELS, PRICE_CENTS_PER_MTOK } from "./models";
 import type { LlmProvider, ProviderRequest, ProviderResponse } from "./provider";
 
 const hasDb = Boolean(process.env.DATABASE_URL);
@@ -76,7 +77,7 @@ describe.skipIf(!hasDb)("createAiClient", () => {
 
     const logs = await db.aiUsageLog.findMany({ where: { userId, task: "extractReceipt" } });
     expect(logs).toHaveLength(1);
-    expect(logs[0]).toMatchObject({ success: true, inputTokens: 1000, outputTokens: 200, model: "claude-sonnet-5" });
+    expect(logs[0]).toMatchObject({ success: true, inputTokens: 1000, outputTokens: 200, model: MODELS.extract });
   });
 
   it("saída inválida faz um retry com o erro no prompt e aceita a segunda", async () => {
@@ -121,5 +122,8 @@ describe.skipIf(!hasDb)("createAiClient", () => {
   });
 });
 
-/** Sonnet 5: 200 c/MTok entrada, 1000 c/MTok saída. */
-const costOf = (input: number, output: number) => Math.ceil(((input * 200 + output * 1000) / 1_000_000) * 100) / 100;
+/** Calcula pelo preço do modelo de extração ativo, seja qual for o provedor. */
+const costOf = (input: number, output: number) => {
+  const price = PRICE_CENTS_PER_MTOK[MODELS.extract];
+  return Math.ceil(((input * price.input + output * price.output) / 1_000_000) * 100) / 100;
+};

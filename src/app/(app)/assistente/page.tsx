@@ -3,13 +3,14 @@ import type { Metadata } from "next";
 import { Chat } from "@/components/assistant/chat";
 import { EmptyState } from "@/components/empty-state";
 import { PageHeader } from "@/components/page-header";
+import { aiEnabled } from "@/ai/models";
 import { requireUserId } from "@/server/auth";
 
 export const metadata: Metadata = { title: "Assistente" };
 
 export default async function AssistentePage() {
   await requireUserId();
-  const enabled = Boolean(process.env.ANTHROPIC_API_KEY);
+  const enabled = aiEnabled();
 
   return (
     <>
@@ -20,7 +21,7 @@ export default async function AssistentePage() {
         <EmptyState
           icon={MessageSquare}
           title="Assistente desligado"
-          description="Defina ANTHROPIC_API_KEY no servidor para perguntar sobre suas finanças. As respostas usam só os números das suas transações e sempre levam a elas."
+          description="Configure a chave de IA no servidor (ver .env.example) para perguntar sobre suas finanças. As respostas usam só os números das suas transações e sempre levam a elas."
         />
       )}
     </>

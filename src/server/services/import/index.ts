@@ -7,6 +7,7 @@ import { db, forUser, type UserDb } from "@/server/db";
 import { categorizeCascade } from "@/server/services/categorize";
 import { NotFoundError } from "@/server/services/transactions";
 import { createAiClient, type AiClient, type BankHint } from "@/ai/client";
+import { aiEnabled } from "@/ai/models";
 import { dedupeRows, type ExistingTx } from "./dedupe";
 import { parseCsv, previewCsv } from "./parsers/csv";
 import { decodeOfx, parseOfx } from "./parsers/ofx";
@@ -56,7 +57,7 @@ export async function startImport(tx: UserDb, userId: string, input: StartImport
   });
 }
 
-export type ProcessDeps = { ai?: AiClient };
+export type ProcessDeps = { ai?: AiClient | null };
 
 type ParseContext = { mapping: CsvMapping | null; userId: string; hint: BankHint; ai: () => AiClient };
 
@@ -120,8 +121,10 @@ export async function processImportBatch(batchId: string, bytes: Uint8Array, map
       const deduped = dedupeRows(parsedRows, existing, { accountId: batch.accountId });
 
       // Categorização em cascata (regra → memória → vizinhos → LLM só com chave configurada).
+      // "ai" in deps distingue "não informado" (usa o padrão) de "null explícito" (desliga,
+      // como os testes de OFX/CSV fazem para nunca gastar chamada real por engano).
       const candidates = deduped.filter((r) => r.status !== "duplicate");
-      const ai = process.env.ANTHROPIC_API_KEY ? (deps.ai ?? createAiClient()) : (deps.ai ?? null);
+      const ai = "ai" in deps ? deps.ai! : aiEnabled() ? createAiClient() : null;
       const results = await categorizeCascade(
         tx,
         userId,
