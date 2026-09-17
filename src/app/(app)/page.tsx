@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { FluxoMensal } from "@/components/charts/fluxo-mensal";
 import { EmptyState } from "@/components/empty-state";
+import { InsightBanner } from "@/components/insights/insight-banner";
 import { BarraCategoria } from "@/components/money/barra-categoria";
 import { CardKPI } from "@/components/money/card-kpi";
 import { Valor } from "@/components/money/valor";
@@ -13,6 +14,7 @@ import { formatPercent, percentChange } from "@/lib/money";
 import { requireUserId } from "@/server/auth";
 import { forUser } from "@/server/db";
 import { getAccountsBalance, getByCategory, getMonthlyFlow, getSummary, periodForMonth, previousMonth } from "@/server/queries/summary";
+import { generateInsights, listInsights } from "@/server/services/insights";
 import { horizonFor, materializeRecurrences } from "@/server/services/recurrence";
 
 export const metadata: Metadata = { title: "Início" };
@@ -31,18 +33,21 @@ export default async function DashboardPage({ searchParams }: { searchParams: Se
 
   const data = await forUser(userId, async (tx) => {
     await materializeRecurrences(tx, userId, { until: horizonFor(today), today });
-    const [summary, previous, categories, flow, balance, hasAny] = await Promise.all([
+    // Insights do mês corrente: detectores determinísticos, texto por template.
+    if (month === today.slice(0, 7)) await generateInsights(tx, userId, today);
+    const [summary, previous, categories, flow, balance, hasAny, insights] = await Promise.all([
       getSummary(tx, userId, period),
       getSummary(tx, userId, periodForMonth(prev)),
       getByCategory(tx, userId, period, "EXPENSE", 8),
       getMonthlyFlow(tx, userId, month, 6),
       getAccountsBalance(tx, userId),
       tx.transaction.count({ where: { userId } }).then((n) => n > 0),
+      listInsights(tx, userId, month, 3),
     ]);
-    return { summary, previous, categories, flow, balance, hasAny };
+    return { summary, previous, categories, flow, balance, hasAny, insights };
   });
 
-  const { summary, previous, categories, flow, balance } = data;
+  const { summary, previous, categories, flow, balance, insights } = data;
   const monthName = formatMonthYear(year, m).split(" ")[0].toLowerCase();
   const prevName = formatMonthYear(...(prev.split("-").map(Number) as [number, number])).split(" ")[0].toLowerCase();
   const listHref = `/transacoes?mes=${month}`;
@@ -103,6 +108,14 @@ export default async function DashboardPage({ searchParams }: { searchParams: Se
               href={listHref}
             />
           </div>
+
+          {insights.length > 0 && (
+            <div className="flex flex-col gap-3">
+              {insights.map((i) => (
+                <InsightBanner key={i.id} insight={i} />
+              ))}
+            </div>
+          )}
 
           <div className="grid gap-6 lg:grid-cols-2">
             <section className="rounded-lg border border-border-subtle bg-surface-raised p-4 shadow-card">
