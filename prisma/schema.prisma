@@ -166,6 +166,7 @@ model User {
   merchantMemory  MerchantMemory[]
   insights        Insight[]
   aiUsageLogs     AiUsageLog[]
+  aiCache         AiCache[]
   auditLogs       AuditLog[]
 
   @@map("profiles")
@@ -511,6 +512,21 @@ model AiUsageLog {
 
   @@index([userId, createdAt])
   @@map("ai_usage_logs")
+}
+
+/// Cache de saída de modelo por hash do conteúdo (chave = task|model|sha256 da entrada).
+model AiCache {
+  key       String   @id
+  userId    String   @map("user_id") @db.Uuid
+  task      String
+  model     String
+  output    Json
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("ai_cache")
 }
 
 model AuditLog {
