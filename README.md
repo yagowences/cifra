@@ -1,36 +1,29 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Cifra
 
-## Getting Started
+Finanças pessoais ingestão-primeiro: extratos e comprovantes entram, lançamentos categorizados e conciliados saem.
 
-First, run the development server:
+## Rodando
 
 ```bash
+cp .env.example .env   # preencha com as chaves do projeto Supabase
+npm install            # roda prisma generate
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+No Supabase, em Authentication → URL Configuration, inclua `http://localhost:3000/auth/callback` nas Redirect URLs.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Scripts
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+| Script | O que faz |
+| --- | --- |
+| `npm run tokens` | Regera `src/styles/tokens.css` a partir de `design-system/tokens.json` |
+| `npm run typecheck` | `tsc --noEmit` |
+| `npm test` | Vitest (unitários) |
+| `npm run test:e2e` | Playwright em desktop e 390px |
 
-## Learn More
+## Decisões que divergem da especificação
 
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- **Supabase Auth no lugar do Clerk.** A RLS usa `auth.uid()` nativo; as variáveis `CLERK_*` e o webhook do Clerk saíram.
+- **Prisma 6 no lugar do 5.** O CLI do Prisma 5 quebra no Node 23+ (`util.isError` removido).
+- **Tailwind v4.** O mapeamento de `tailwind.config.ts` da spec vive em `@theme` dentro do CSS gerado; os nomes de classe são os mesmos (`bg-surface-raised`, `text-ink-secondary`, `bg-brand`, `text-brand-on`).
+- **Design tokens são gerados, não copiados.** Mudou o `tokens.json` do Design System, rode `npm run tokens`; um teste falha se o CSS versionado estiver desatualizado.

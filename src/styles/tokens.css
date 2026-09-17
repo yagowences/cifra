@@ -1,0 +1,142 @@
+/* GERADO por scripts/build-tokens.ts a partir de design-system/tokens.json. Não editar à mão. */
+
+:root,
+[data-theme="dark"] {
+  color-scheme: dark;
+  --surface-base: #0b0f0d;
+  --surface-raised: #131916;
+  --surface-sunken: #080b0a;
+  --surface-overlay: #131916e6;
+  --border-subtle: #1e2724;
+  --border-strong: #2c3833;
+  --ink-primary: #eaf0ec;
+  --ink-secondary: #9aa8a1;
+  --ink-muted: #7f8e87;
+  --brand: #35c48b;
+  --brand-strong: #2aae7b;
+  --brand-soft: #12261e;
+  --on-brand: #04120c;
+  --positive: var(--brand);
+  --negative: #f26b7a;
+  --negative-soft: #2a1417;
+  --warning: #e2a13c;
+  --warning-soft: #241a0c;
+  --focus-ring: var(--brand);
+  --chart-1: var(--brand);
+  --chart-2: #7fb7a3;
+  --chart-3: #c9a227;
+  --chart-4: #7e8fa8;
+  --chart-5: #b0766a;
+  --shadow-card: 0 1px 2px rgba(0,0,0,0.4);
+  --shadow-sheet: 0 -8px 32px rgba(0,0,0,0.6);
+}
+
+[data-theme="light"] {
+  color-scheme: light;
+  --surface-base: #f7f8f7;
+  --surface-raised: #ffffff;
+  --surface-sunken: #eff1f0;
+  --surface-overlay: #ffffffe6;
+  --border-subtle: #e3e7e5;
+  --border-strong: #cbd3cf;
+  --ink-primary: #0c1310;
+  --ink-secondary: #5c6b64;
+  --ink-muted: #6e7c75;
+  --brand: #0b7a55;
+  --brand-strong: #095f43;
+  --brand-soft: #e4f3ec;
+  --on-brand: #ffffff;
+  --positive: var(--brand);
+  --negative: #c8253b;
+  --negative-soft: #fdeaec;
+  --warning: #9a6510;
+  --warning-soft: #fbf0dc;
+  --focus-ring: var(--brand);
+  --chart-1: var(--brand);
+  --chart-2: #3f8672;
+  --chart-3: #8a6d10;
+  --chart-4: #4a5b72;
+  --chart-5: #7a473d;
+  --shadow-card: 0 1px 2px rgba(12,19,16,0.06);
+  --shadow-sheet: 0 -8px 32px rgba(12,19,16,0.12);
+}
+
+@theme inline {
+  --color-surface-base: var(--surface-base);
+  --color-surface-raised: var(--surface-raised);
+  --color-surface-sunken: var(--surface-sunken);
+  --color-surface-overlay: var(--surface-overlay);
+  --color-border-subtle: var(--border-subtle);
+  --color-border-strong: var(--border-strong);
+  --color-ink-primary: var(--ink-primary);
+  --color-ink-secondary: var(--ink-secondary);
+  --color-ink-muted: var(--ink-muted);
+  --color-brand: var(--brand);
+  --color-brand-strong: var(--brand-strong);
+  --color-brand-soft: var(--brand-soft);
+  --color-on-brand: var(--on-brand);
+  --color-positive: var(--positive);
+  --color-negative: var(--negative);
+  --color-negative-soft: var(--negative-soft);
+  --color-warning: var(--warning);
+  --color-warning-soft: var(--warning-soft);
+  --color-focus-ring: var(--focus-ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-brand-on: var(--on-brand);
+  --radius-xs: 6px;
+  --radius-sm: 10px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 24px;
+  --radius-full: 999px;
+  --text-display-xl: 40px;
+  --text-display-xl--line-height: 40px;
+  --text-display-xl--font-weight: 600;
+  --text-display-xl--letter-spacing: -0.02em;
+  --text-display-l: 32px;
+  --text-display-l--line-height: 36px;
+  --text-display-l--font-weight: 600;
+  --text-display-l--letter-spacing: -0.02em;
+  --text-heading: 24px;
+  --text-heading--line-height: 30px;
+  --text-heading--font-weight: 600;
+  --text-heading--letter-spacing: -0.01em;
+  --text-title: 18px;
+  --text-title--line-height: 24px;
+  --text-title--font-weight: 600;
+  --text-body: 15px;
+  --text-body--line-height: 22px;
+  --text-body--font-weight: 400;
+  --text-body-strong: 15px;
+  --text-body-strong--line-height: 22px;
+  --text-body-strong--font-weight: 500;
+  --text-caption: 13px;
+  --text-caption--line-height: 18px;
+  --text-caption--font-weight: 400;
+  --text-micro: 11px;
+  --text-micro--line-height: 14px;
+  --text-micro--font-weight: 500;
+  --text-micro--letter-spacing: 0.06em;
+  --text-amount-hero: 36px;
+  --text-amount-hero--line-height: 38px;
+  --text-amount-hero--font-weight: 600;
+  --text-amount-hero--letter-spacing: -0.02em;
+  --text-amount-lg: 22px;
+  --text-amount-lg--line-height: 26px;
+  --text-amount-lg--font-weight: 600;
+  --text-amount-md: 15px;
+  --text-amount-md--line-height: 20px;
+  --text-amount-md--font-weight: 500;
+}
+
+@utility shadow-card {
+  box-shadow: var(--shadow-card);
+}
+
+@utility shadow-sheet {
+  box-shadow: var(--shadow-sheet);
+}
