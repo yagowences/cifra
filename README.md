@@ -39,7 +39,8 @@ PDF é lido pelo modelo (`ai/client.ts`, exige a chave do provedor ativo — ver
 | | `AI_PROVIDER=gemini` (padrão) | `AI_PROVIDER=anthropic` |
 | --- | --- | --- |
 | Chave | `GOOGLE_API_KEY` — gratuita em [aistudio.google.com/apikey](https://aistudio.google.com/apikey), sem cartão | `ANTHROPIC_API_KEY` (mais `ANTHROPIC_WORKSPACE_ID` se a chave for de organização) |
-| Extração/categorização/assistente | `gemini-flash-latest` | `claude-sonnet-5` |
+| Extração de PDF/comprovante | `gemini-flash-lite-latest` (testado contra fatura real; o flash cheio andou sobrecarregado) | `claude-sonnet-5` |
+| Categorização/assistente | `gemini-flash-latest` | `claude-sonnet-5` |
 | Tarefas simples | `gemini-flash-lite-latest` | `claude-haiku-4-5` |
 | Custo no free tier | R$ 0 (só limite de requisições) | pago por chamada |
 

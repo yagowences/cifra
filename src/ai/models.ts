@@ -9,7 +9,9 @@ export const AI_PROVIDER: AiProvider = (process.env.AI_PROVIDER?.toLowerCase() a
 
 const DEFAULTS: Record<AiProvider, { extract: string; categorize: string; simple: string; answer: string }> = {
   // Aliases "-latest" da Google: sempre o modelo corrente da família, sem versão presa.
-  gemini: { extract: "gemini-flash-latest", categorize: "gemini-flash-latest", simple: "gemini-flash-lite-latest", answer: "gemini-flash-latest" },
+  // extract usa o flash-lite: testado contra um PDF real (fatura Nubank, 12 lançamentos,
+  // saldo batendo), e o flash cheio andou devolvendo 503 de sobrecarga com frequência.
+  gemini: { extract: "gemini-flash-lite-latest", categorize: "gemini-flash-latest", simple: "gemini-flash-lite-latest", answer: "gemini-flash-latest" },
   // Como a especificação pede: Sonnet para extração/categorização, Haiku para tarefas simples.
   anthropic: { extract: "claude-sonnet-5", categorize: "claude-sonnet-5", simple: "claude-haiku-4-5", answer: "claude-sonnet-5" },
 };
