@@ -193,6 +193,7 @@ model Account {
   transfersIn   Transaction[] @relation("TransferTarget")
   importBatches ImportBatch[]
   goals         Goal[]
+  snapshots     NetWorthSnapshot[]
 
   @@index([userId, archived])
   @@map("accounts")
@@ -423,18 +424,22 @@ model Asset {
   @@map("assets")
 }
 
+/// Foto mensal do valor de um ativo ou de uma conta. O gráfico de evolução lê daqui, nunca recalcula.
 model NetWorthSnapshot {
-  id      String   @id @default(cuid())
-  userId  String   @map("user_id") @db.Uuid
-  assetId String   @map("asset_id")
-  date    DateTime @db.Date
-  value   BigInt
+  id        String   @id @default(cuid())
+  userId    String   @map("user_id") @db.Uuid
+  assetId   String?  @map("asset_id")
+  accountId String?  @map("account_id")
+  date      DateTime @db.Date
+  value     BigInt
 
-  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
-  asset Asset @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  user    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  asset   Asset?   @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  account Account? @relation(fields: [accountId], references: [id], onDelete: Cascade)
 
   @@unique([assetId, date])
   @@index([userId, date])
+  @@index([accountId])
   @@map("net_worth_snapshots")
 }
 
