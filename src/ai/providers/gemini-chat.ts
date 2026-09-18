@@ -4,6 +4,9 @@ import { ApiError, FinishReason, GoogleGenAI, type Content, type FunctionDeclara
 import type { ChatModel } from "../assistant";
 import { ProviderUnavailableError } from "./errors";
 
+/** Carrega a assinatura de "pensamento" do Gemini num tool_use, já que Anthropic.ToolUseBlock não tem campo pra isso. */
+type GeminiToolUseBlock = Anthropic.ToolUseBlock & { thoughtSignature?: string };
+
 /**
  * Faz o loop de ferramentas de assistant.ts (escrito contra o formato da
  * Anthropic) rodar sobre o Gemini: traduz Tool/MessageParam → FunctionDeclaration/
@@ -35,6 +38,10 @@ export class GeminiChatModel implements ChatModel {
           systemInstruction: typeof params.system === "string" ? params.system : undefined,
           maxOutputTokens: params.max_tokens,
           tools: tools.length ? [{ functionDeclarations: tools }] : undefined,
+          // "disabled" do lado Anthropic → thinkingBudget 0: sem isso o Gemini pensa por padrão,
+          // assina a chamada de ferramenta (thoughtSignature) e exige a assinatura de volta no
+          // próximo turno — que o formato Anthropic.ToolUseBlock não tem onde guardar.
+          thinkingConfig: params.thinking?.type === "disabled" ? { thinkingBudget: 0 } : undefined,
         },
       });
       return toAnthropicMessage(response, params.model);
@@ -59,7 +66,8 @@ function toGeminiContents(messages: Anthropic.MessageParam[]): Content[] {
       if (block.type === "text") return { text: block.text };
       if (block.type === "tool_use") {
         nameById.set(block.id, block.name);
-        return { functionCall: { id: block.id, name: block.name, args: block.input as Record<string, unknown> } };
+        const thoughtSignature = (block as GeminiToolUseBlock).thoughtSignature;
+        return { functionCall: { id: block.id, name: block.name, args: block.input as Record<string, unknown> }, ...(thoughtSignature ? { thoughtSignature } : {}) };
       }
       if (block.type === "tool_result") {
         const text = typeof block.content === "string" ? block.content : JSON.stringify(block.content);
@@ -100,7 +108,8 @@ function toAnthropicMessage(response: Awaited<ReturnType<GoogleGenAI["models"]["
         input: part.functionCall.args ?? {},
         // O SDK da Anthropic marca a origem da chamada; aqui é sempre direta (sem servidor MCP).
         caller: { type: "direct" },
-      } as Anthropic.ToolUseBlock);
+        ...(part.thoughtSignature ? { thoughtSignature: part.thoughtSignature } : {}),
+      } as GeminiToolUseBlock);
     }
   }
 

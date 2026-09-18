@@ -23,7 +23,9 @@ export function Chat() {
   const [pending, startTransition] = useTransition();
   const endRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => endRef.current?.scrollIntoView({ block: "end" }), [turns, pending]);
+  useEffect(() => {
+    endRef.current?.scrollIntoView({ block: "end" });
+  }, [turns, pending]);
 
   const ask = (question: string) => {
     const q = question.trim();
