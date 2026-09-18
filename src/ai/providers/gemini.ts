@@ -17,7 +17,10 @@ export class GeminiProvider implements LlmProvider {
     if (!process.env.GOOGLE_API_KEY) {
       throw new ProviderUnavailableError("GOOGLE_API_KEY ausente: a extração por IA está desligada.");
     }
-    this.client ??= new GoogleGenAI({ apiKey: process.env.GOOGLE_API_KEY });
+    // Sem timeout, uma rede instável deixa a chamada pendurada por minutos (visto em produção:
+    // HeadersTimeoutError do undici bem depois de 60s). Extração é o passo mais lento (PDF grande,
+    // maxTokens alto), por isso um teto maior que o do chat.
+    this.client ??= new GoogleGenAI({ apiKey: process.env.GOOGLE_API_KEY, httpOptions: { timeout: 120_000 } });
     return this.client;
   }
 

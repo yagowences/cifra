@@ -19,7 +19,9 @@ export class GeminiChatModel implements ChatModel {
 
   private get sdk(): GoogleGenAI {
     if (!process.env.GOOGLE_API_KEY) throw new ProviderUnavailableError("GOOGLE_API_KEY ausente: o assistente está desligado.");
-    this.client ??= new GoogleGenAI({ apiKey: process.env.GOOGLE_API_KEY });
+    // Sem timeout, uma rede instável deixa a chamada pendurada por minutos em vez de falhar rápido
+    // (visto em produção: uma resposta demorou 286s). 60s casa com o timeout do AnthropicChatModel.
+    this.client ??= new GoogleGenAI({ apiKey: process.env.GOOGLE_API_KEY, httpOptions: { timeout: 60_000 } });
     return this.client;
   }
 
