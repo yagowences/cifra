@@ -80,6 +80,20 @@ describe.skipIf(!hasDb)("importação de PDF", () => {
     expect(layer.pages).toBe(1);
     expect(layer.hasTextLayer).toBe(true);
     expect(layer.text).toContain("IFOOD");
+    expect(layer.repaired).toBe(false);
+  });
+
+  it("recupera um PDF com zeros (download interrompido) antes do cabeçalho", async () => {
+    const padded = new Uint8Array(2000 + minimalPdf(STATEMENT_TEXT).length);
+    padded.set(minimalPdf(STATEMENT_TEXT), 2000);
+    const layer = await pdfTextLayer(padded);
+    expect(layer.repaired).toBe(true);
+    expect(layer.text).toContain("IFOOD");
+  });
+
+  it("sem cabeçalho %PDF em lugar nenhum, dá erro explicando a causa provável", async () => {
+    const garbage = new Uint8Array(500);
+    await expect(pdfTextLayer(garbage)).rejects.toThrow(/corrompido|incompleto|senha/);
   });
 
   it("com saldo de abertura e fechamento, a soma confere em código e a confiança baixa vem marcada", async () => {

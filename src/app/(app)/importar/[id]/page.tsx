@@ -144,7 +144,7 @@ export default async function RevisaoImportacaoPage({ params }: { params: Promis
         <div className="flex flex-col items-start gap-4">
           <div className="flex items-start gap-3 rounded-lg bg-negative-soft px-4 py-3 text-caption">
             <TriangleAlert size={18} strokeWidth={1.5} className="mt-px shrink-0 text-negative" aria-hidden />
-            <span className="text-ink-primary">Não consegui ler este arquivo. {batch.error}</span>
+            <span className="text-ink-primary">{batch.error ?? "Não consegui importar este arquivo."}</span>
           </div>
           <Link href="/importar" className={botaoVariants({ variant: "secundario" })}>
             Enviar outro arquivo
