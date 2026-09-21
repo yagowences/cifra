@@ -1,8 +1,8 @@
 import "server-only";
 import type Anthropic from "@anthropic-ai/sdk";
-import { ApiError, FinishReason, GoogleGenAI, type Content, type FunctionDeclaration, type Part } from "@google/genai";
+import { FinishReason, GoogleGenAI, type Content, type FunctionDeclaration, type Part } from "@google/genai";
 import type { ChatModel } from "../assistant";
-import { ProviderUnavailableError } from "./errors";
+import { friendlyGeminiError, ProviderUnavailableError } from "./errors";
 
 /** Carrega a assinatura de "pensamento" do Gemini num tool_use, já que Anthropic.ToolUseBlock não tem campo pra isso. */
 type GeminiToolUseBlock = Anthropic.ToolUseBlock & { thoughtSignature?: string };
@@ -48,11 +48,7 @@ export class GeminiChatModel implements ChatModel {
       });
       return toAnthropicMessage(response, params.model);
     } catch (e) {
-      if (e instanceof ApiError) {
-        if (e.status === 401 || e.status === 403) throw new ProviderUnavailableError("Chave do Gemini inválida ou sem permissão.");
-        if (e.status === 429) throw new ProviderUnavailableError("Limite gratuito do Gemini atingido por agora; tente mais tarde.");
-      }
-      throw e;
+      throw friendlyGeminiError(e);
     }
   }
 }

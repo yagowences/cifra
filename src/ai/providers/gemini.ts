@@ -1,7 +1,7 @@
 import "server-only";
-import { ApiError, GoogleGenAI, FinishReason, type Part } from "@google/genai";
+import { GoogleGenAI, FinishReason, type Part } from "@google/genai";
 import type { LlmProvider, ProviderContent, ProviderRequest, ProviderResponse } from "../provider";
-import { ProviderUnavailableError } from "./errors";
+import { friendlyGeminiError, ProviderUnavailableError } from "./errors";
 
 function toPart(c: ProviderContent): Part {
   if (c.type === "text") return { text: c.text };
@@ -40,11 +40,7 @@ export class GeminiProvider implements LlmProvider {
         stopReason: finish,
       };
     } catch (e) {
-      if (e instanceof ApiError) {
-        if (e.status === 401 || e.status === 403) throw new ProviderUnavailableError("Chave do Gemini inválida ou sem permissão.");
-        if (e.status === 429) throw new ProviderUnavailableError("Limite gratuito do Gemini atingido por agora; tente mais tarde.");
-      }
-      throw e;
+      throw friendlyGeminiError(e);
     }
   }
 }
