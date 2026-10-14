@@ -9,7 +9,7 @@ import { hasQueue, inngest } from "@/inngest/client";
 import { requireUserId } from "@/server/auth";
 import { db, forUser } from "@/server/db";
 import { confirmImport, formatFromName, processImportBatch, startImport, undoImport } from "@/server/services/import";
-import { csvMappingSchema } from "@/server/services/import/types";
+import { csvMappingSchema, isStaleProcessing } from "@/server/services/import/types";
 import { downloadAsUser } from "@/server/storage";
 import type { ActionResult } from "./transactions";
 
@@ -50,19 +50,48 @@ export async function startImportAction(payload: unknown): Promise<ActionResult<
   try {
     const bytes = await downloadAsUser(storageKey);
     const batch = await forUser(userId, (tx) => startImport(tx, userId, { accountId, storageKey, fileName, format, bytes }));
-    if (hasQueue()) {
-      await inngest.send({ name: "import/batch.created", data: { batchId: batch.id } });
-    } else {
-      after(async () => {
-        try {
-          await processImportBatch(batch.id, bytes);
-        } catch (e) {
-          console.error("processImportBatch", e);
-        }
-      });
-    }
+    await dispatchProcessing(batch.id, bytes);
     revalidate();
     return { ok: true, data: { batchId: batch.id } };
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+/** Fila (Inngest) quando configurada; senão roda depois da resposta, no próprio servidor. */
+async function dispatchProcessing(batchId: string, bytes: Uint8Array) {
+  if (hasQueue()) {
+    await inngest.send({ name: "import/batch.created", data: { batchId } });
+    return;
+  }
+  after(async () => {
+    try {
+      await processImportBatch(batchId, bytes);
+    } catch (e) {
+      console.error("processImportBatch", e);
+    }
+  });
+}
+
+/**
+ * Reprocessa um lote que falhou ou ficou preso, com o arquivo que já está no Storage — sem a pessoa
+ * precisar escolher conta e arquivo de novo. Útil sobretudo para PDF: a leitura por IA depende de um
+ * serviço gratuito que oscila, e a falha costuma passar em minutos.
+ */
+export async function retryImportAction(batchId: string): Promise<ActionResult> {
+  const userId = await requireUserId();
+  try {
+    const batch = await db.importBatch.findFirst({ where: { id: batchId, userId } });
+    if (!batch) return { ok: false, message: "Lote não encontrado." };
+    if (batch.status !== "FAILED" && !isStaleProcessing(batch)) return { ok: false, message: "Este lote não está parado: aguarde ou recarregue a página." };
+    if (batch.format === "PDF" && !aiEnabled()) return { ok: false, message: PDF_SEM_IA };
+
+    const bytes = await downloadAsUser(batch.storageKey);
+    // Volta para PENDING na hora: renova o updatedAt, senão a página ainda o veria como preso.
+    await db.importBatch.update({ where: { id: batchId }, data: { status: "PENDING", error: null } });
+    await dispatchProcessing(batch.id, bytes);
+    revalidate();
+    return { ok: true, data: undefined };
   } catch (e) {
     return fail(e);
   }

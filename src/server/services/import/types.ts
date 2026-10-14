@@ -53,6 +53,16 @@ export const reviewRowSchema = parsedRowSchema.extend({
 export const isLowConfidence = (row: { fieldConfidence?: { date: number; amount: number; description: number } }) =>
   Boolean(row.fieldConfidence && Object.values(row.fieldConfidence).some((c) => c < 0.8));
 
+/**
+ * Um lote em PENDING/PROCESSING que não se mexe há mais que isto foi interrompido. O processamento
+ * roda em `after()` dentro de uma function da Netlify, que é encerrada aos 60 s sem avisar — sem
+ * isto o lote ficaria em "Lendo…" para sempre. A margem sobre os 60 s cobre atraso de relógio.
+ */
+export const STALE_PROCESSING_MS = 90_000;
+
+export const isStaleProcessing = (batch: { status: string; updatedAt: Date }, now = Date.now()) =>
+  (batch.status === "PENDING" || batch.status === "PROCESSING") && now - batch.updatedAt.getTime() > STALE_PROCESSING_MS;
+
 export type ReviewRow = z.infer<typeof reviewRowSchema>;
 
 export const csvMappingSchema = z.object({

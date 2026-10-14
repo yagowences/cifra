@@ -7,11 +7,13 @@ import { EmptyState } from "@/components/empty-state";
 import { MapeadorColunas } from "@/components/import/mapeador-colunas";
 import { ProcessingPoller } from "@/components/import/processing-poller";
 import { TabelaRevisao } from "@/components/import/tabela-revisao";
+import { TentarDeNovo } from "@/components/import/tentar-de-novo";
 import { PageHeader } from "@/components/page-header";
 import { formatBRL } from "@/lib/money";
 import { requireUserId } from "@/server/auth";
 import { forUser } from "@/server/db";
 import { readReviewRows } from "@/server/services/import";
+import { isStaleProcessing } from "@/server/services/import/types";
 
 export const metadata: Metadata = { title: "Revisão de importação" };
 
@@ -35,6 +37,9 @@ export default async function RevisaoImportacaoPage({ params }: { params: Promis
   const rows = readReviewRows(batch);
   const month = (rows[0]?.date ?? new Date().toISOString()).slice(0, 7);
   const steps = ["Envio", "Leitura", "Revisão", "Confirmação"];
+  // Lote que parou de se mexer (a function da Netlify morre aos 60 s) deixa de ser "lendo": vira falha.
+  const stale = isStaleProcessing(batch);
+  const failed = batch.status === "FAILED" || stale;
   const current = batch.status === "CONFIRMED" ? 3 : batch.status === "READY_FOR_REVIEW" || batch.status === "NEEDS_MAPPING" ? 2 : 1;
 
   return (
@@ -103,7 +108,7 @@ export default async function RevisaoImportacaoPage({ params }: { params: Promis
         </div>
       )}
 
-      {(batch.status === "PENDING" || batch.status === "PROCESSING") && (
+      {(batch.status === "PENDING" || batch.status === "PROCESSING") && !stale && (
         <>
           <ProcessingPoller />
           <div aria-busy="true" className="flex flex-col gap-3">
@@ -140,15 +145,20 @@ export default async function RevisaoImportacaoPage({ params }: { params: Promis
 
       {batch.status === "UNDONE" && <EmptyState icon={FileSearch} title="Importação desfeita" description="Os lançamentos deste lote foram removidos." action={{ href: "/importar", label: "Voltar" }} />}
 
-      {batch.status === "FAILED" && (
+      {failed && (
         <div className="flex flex-col items-start gap-4">
           <div className="flex items-start gap-3 rounded-lg bg-negative-soft px-4 py-3 text-caption">
             <TriangleAlert size={18} strokeWidth={1.5} className="mt-px shrink-0 text-negative" aria-hidden />
-            <span className="text-ink-primary">{batch.error ?? "Não consegui importar este arquivo."}</span>
+            <span className="text-ink-primary">
+              {stale ? "A leitura foi interrompida por demorar demais — costuma ser a IA lenta ou fora do ar. Tente de novo." : (batch.error ?? "Não consegui importar este arquivo.")}
+            </span>
           </div>
-          <Link href="/importar" className={botaoVariants({ variant: "secundario" })}>
-            Enviar outro arquivo
-          </Link>
+          <div className="flex flex-wrap items-center gap-3">
+            <TentarDeNovo batchId={batch.id} />
+            <Link href="/importar" className={botaoVariants({ variant: "secundario" })}>
+              Enviar outro arquivo
+            </Link>
+          </div>
         </div>
       )}
     </>
