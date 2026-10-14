@@ -9,6 +9,7 @@ import { formatShortDate, toISODate } from "@/lib/dates";
 import { requireUserId } from "@/server/auth";
 import { forUser } from "@/server/db";
 import { listAccounts } from "@/server/services/accounts";
+import { isStaleProcessing } from "@/server/services/import/types";
 
 export const metadata: Metadata = { title: "Importar" };
 
@@ -28,7 +29,8 @@ export default async function ImportarPage() {
     id: b.id,
     fileName: b.fileName,
     accountName: b.account.name,
-    status: b.status,
+    // Lote preso em PENDING/PROCESSING (function encerrada) aparece como falha, não como "Lendo…" eterno.
+    status: isStaleProcessing(b) ? "FAILED" : b.status,
     readCount: b.readCount,
     createdCount: b.createdCount,
     duplicateCount: b.duplicateCount,

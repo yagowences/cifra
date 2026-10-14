@@ -53,7 +53,8 @@ export function ListaLotes({ batches }: { batches: BatchListItem[] }) {
       <ul className="overflow-hidden rounded-lg border border-border-subtle bg-surface-raised">
         {batches.map((b) => {
           const s = STATUS[b.status];
-          const reviewable = b.status === "READY_FOR_REVIEW" || b.status === "NEEDS_MAPPING" || b.status === "PENDING" || b.status === "PROCESSING";
+          // FAILED também abre: é lá que fica o "Tentar de novo".
+          const reviewable = b.status === "READY_FOR_REVIEW" || b.status === "NEEDS_MAPPING" || b.status === "PENDING" || b.status === "PROCESSING" || b.status === "FAILED";
           return (
             <li key={b.id} className="flex items-center gap-3 border-t border-border-subtle px-4 py-3 first:border-t-0">
               <span className="flex size-10 shrink-0 items-center justify-center rounded-sm bg-surface-sunken text-ink-secondary">
