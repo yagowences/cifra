@@ -5,9 +5,10 @@ import type { z } from "zod";
 import { db } from "@/server/db";
 import { costCents, monthlyBudgetCents } from "./cost";
 import { MODELS } from "./models";
-import type { LlmProvider, ProviderContent } from "./provider";
+import type { LlmProvider, ProviderContent, ProviderRequest, ProviderResponse } from "./provider";
 import { AI_PROVIDER } from "./models";
 import { AnthropicProvider } from "./providers/anthropic";
+import { ProviderUnavailableError } from "./providers/errors";
 import { GeminiProvider } from "./providers/gemini";
 import { redactPII } from "./redact";
 import { categorizedSchema, type Categorized } from "./schemas/categorize";
@@ -63,9 +64,14 @@ export type AiClientOptions = {
   /** Chamadas por minuto por usuário. */
   ratePerMinute?: number;
   now?: () => Date;
+  /** Esperas entre tentativas quando o provedor está sobrecarregado; o tamanho é o nº de retries. */
+  backoffMs?: number[];
 };
 
 const RATE_PER_MINUTE = 20;
+const TRANSIENT_BACKOFF_MS = [1_000, 3_000];
+/** Passado isto desde a primeira tentativa, não começa outra: o cliente do provedor já tem timeout próprio. */
+const TRANSIENT_BUDGET_MS = 45_000;
 
 const sha256 = (s: string) => createHash("sha256").update(s).digest("hex");
 
@@ -119,6 +125,27 @@ export function createAiClient(opts: AiClientOptions = {}): AiClient {
   const provider = opts.provider ?? (AI_PROVIDER === "anthropic" ? new AnthropicProvider() : new GeminiProvider());
   const ratePerMinute = opts.ratePerMinute ?? RATE_PER_MINUTE;
   const now = opts.now ?? (() => new Date());
+  const backoffMs = opts.backoffMs ?? TRANSIENT_BACKOFF_MS;
+
+  /**
+   * Repete só o que some sozinho (sobrecarga do provedor, marcada como `retryable`). Chave inválida e
+   * cota esgotada não são repetidas: esperar segundos não resolve e só faria a pessoa aguardar à toa.
+   * Fica dentro do try do runJson para um conjunto de tentativas gerar UM registro de uso — o rate
+   * limit conta linhas desse log, então logar cada tentativa faria o retry se autoestrangular.
+   */
+  async function completeWithRetry(req: ProviderRequest): Promise<ProviderResponse> {
+    const firstAt = Date.now();
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await provider.complete(req);
+      } catch (e) {
+        const transient = e instanceof ProviderUnavailableError && e.retryable;
+        if (!transient || attempt >= backoffMs.length || Date.now() - firstAt > TRANSIENT_BUDGET_MS) throw e;
+        const wait = backoffMs[attempt];
+        await new Promise((resolve) => setTimeout(resolve, wait + Math.floor(Math.random() * wait * 0.3)));
+      }
+    }
+  }
 
   const guard = (userId: string) => assertAiAllowed(userId, { ratePerMinute, now: now() });
 
@@ -150,7 +177,7 @@ export function createAiClient(opts: AiClientOptions = {}): AiClient {
       let inputTokens = 0;
       let outputTokens = 0;
       try {
-        const res = await provider.complete({ model: spec.model, system: spec.system, content, maxTokens: spec.maxTokens });
+        const res = await completeWithRetry({ model: spec.model, system: spec.system, content, maxTokens: spec.maxTokens });
         text = res.text;
         model = res.model;
         inputTokens = res.inputTokens;

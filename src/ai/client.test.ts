@@ -7,6 +7,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { db } from "@/server/db";
 import { BudgetExceededError, createAiClient, extractJson, ManualReviewError, RateLimitedError } from "./client";
 import { MODELS, PRICE_CENTS_PER_MTOK } from "./models";
+import { ProviderUnavailableError } from "./providers/errors";
 import type { LlmProvider, ProviderRequest, ProviderResponse } from "./provider";
 
 const hasDb = Boolean(process.env.DATABASE_URL);
@@ -14,9 +15,15 @@ const userId = randomUUID();
 
 class FakeProvider implements LlmProvider {
   calls: ProviderRequest[] = [];
-  constructor(private responses: string[]) {}
+  private failures: Error[];
+  /** `failures` são lançadas, uma por chamada, antes de qualquer resposta. */
+  constructor(private responses: string[], failures: Error[] = []) {
+    this.failures = [...failures];
+  }
   async complete(req: ProviderRequest): Promise<ProviderResponse> {
     this.calls.push(req);
+    const failure = this.failures.shift();
+    if (failure) throw failure;
     const text = this.responses.shift() ?? "{}";
     return { text, model: req.model, inputTokens: 1000, outputTokens: 200, stopReason: "end_turn" };
   }
@@ -112,6 +119,38 @@ describe.skipIf(!hasDb)("createAiClient", () => {
     } finally {
       if (original === undefined) delete process.env.AI_MONTHLY_BUDGET_CENTS_PER_USER;
       else process.env.AI_MONTHLY_BUDGET_CENTS_PER_USER = original;
+    }
+  });
+
+  it("sobrecarga transitória é repetida e a tentativa seguinte vale; as tentativas geram um único registro", async () => {
+    const sobrecarga = () => new ProviderUnavailableError("O Gemini está sobrecarregado agora.", true);
+    const provider = new FakeProvider([validReceipt], [sobrecarga(), sobrecarga()]);
+    const ai = createAiClient({ provider, backoffMs: [0, 0] });
+    const antes = await db.aiUsageLog.count({ where: { userId } });
+
+    const r = await ai.extractReceipt(userId, { kind: "text", text: "comprovante E" });
+
+    expect(r.data.amount).toBe(18740);
+    expect(provider.calls).toHaveLength(3);
+    // Um registro por pedido, não por tentativa: o rate limit conta essas linhas.
+    expect(await db.aiUsageLog.count({ where: { userId } })).toBe(antes + 1);
+  });
+
+  it("sobrecarga que não passa esgota as tentativas e propaga o erro", async () => {
+    const sobrecarga = () => new ProviderUnavailableError("O Gemini está sobrecarregado agora.", true);
+    const provider = new FakeProvider([validReceipt], [sobrecarga(), sobrecarga(), sobrecarga(), sobrecarga()]);
+    const ai = createAiClient({ provider, backoffMs: [0, 0] });
+    await expect(ai.extractReceipt(userId, { kind: "text", text: "comprovante F" })).rejects.toBeInstanceOf(ProviderUnavailableError);
+    // Primeira chamada + 2 retries; a 4ª falha programada nem chega a ser consumida.
+    expect(provider.calls).toHaveLength(3);
+  });
+
+  it("chave inválida e cota esgotada não são repetidas: esperar não resolve", async () => {
+    for (const [i, motivo] of ["Chave do Gemini inválida ou sem permissão.", "Limite gratuito do Gemini atingido por agora."].entries()) {
+      const provider = new FakeProvider([validReceipt], [new ProviderUnavailableError(motivo)]);
+      const ai = createAiClient({ provider, backoffMs: [0, 0] });
+      await expect(ai.extractReceipt(userId, { kind: "text", text: `comprovante G${i}` })).rejects.toBeInstanceOf(ProviderUnavailableError);
+      expect(provider.calls).toHaveLength(1);
     }
   });
 
