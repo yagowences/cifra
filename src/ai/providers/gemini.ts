@@ -1,7 +1,8 @@
 import "server-only";
-import { GoogleGenAI, FinishReason, type Part } from "@google/genai";
+import { FinishReason, type GoogleGenAI, type Part } from "@google/genai";
 import type { LlmProvider, ProviderContent, ProviderRequest, ProviderResponse } from "../provider";
 import { friendlyGeminiError, ProviderUnavailableError } from "./errors";
+import { createGeminiClient } from "./gemini-client";
 
 function toPart(c: ProviderContent): Part {
   if (c.type === "text") return { text: c.text };
@@ -21,7 +22,7 @@ export class GeminiProvider implements LlmProvider {
     // do undici bem depois de 60s). O teto também precisa caber no limite de 60 s de execução de uma
     // function da Netlify, que não é configurável: se a chamada passasse disso, a function seria
     // encerrada no meio do `after()` e o lote ficaria em "Lendo…" sem nunca falhar.
-    this.client ??= new GoogleGenAI({ apiKey: process.env.GOOGLE_API_KEY, httpOptions: { timeout: 30_000 } });
+    this.client ??= createGeminiClient(process.env.GOOGLE_API_KEY, 30_000);
     return this.client;
   }
 

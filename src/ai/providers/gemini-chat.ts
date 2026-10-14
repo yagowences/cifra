@@ -1,8 +1,9 @@
 import "server-only";
 import type Anthropic from "@anthropic-ai/sdk";
-import { FinishReason, GoogleGenAI, type Content, type FunctionDeclaration, type Part } from "@google/genai";
+import { FinishReason, type GoogleGenAI, type Content, type FunctionDeclaration, type Part } from "@google/genai";
 import type { ChatModel } from "../assistant";
 import { friendlyGeminiError, ProviderUnavailableError } from "./errors";
+import { createGeminiClient } from "./gemini-client";
 
 /** Carrega a assinatura de "pensamento" do Gemini num tool_use, já que Anthropic.ToolUseBlock não tem campo pra isso. */
 type GeminiToolUseBlock = Anthropic.ToolUseBlock & { thoughtSignature?: string };
@@ -23,7 +24,7 @@ export class GeminiChatModel implements ChatModel {
     // (visto: uma resposta demorou 286s). O assistente roda numa server action, sujeita ao limite de
     // 60 s de uma function da Netlify, e o loop pode fazer mais de uma chamada: 25 s por chamada
     // deixa a falha chegar como mensagem em vez de a plataforma derrubar a requisição.
-    this.client ??= new GoogleGenAI({ apiKey: process.env.GOOGLE_API_KEY, httpOptions: { timeout: 25_000 } });
+    this.client ??= createGeminiClient(process.env.GOOGLE_API_KEY, 25_000);
     return this.client;
   }
 
