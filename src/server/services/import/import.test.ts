@@ -4,6 +4,8 @@
  */
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import type { AiClient } from "@/ai/client";
+import { ProviderUnavailableError } from "@/ai/providers/errors";
 import { db, forUser } from "@/server/db";
 import { createAccount } from "@/server/services/accounts";
 import { createTransaction } from "@/server/services/transactions";
@@ -11,6 +13,30 @@ import { confirmImport, ImportError, processImportBatch, readReviewRows, startIm
 
 const hasDb = Boolean(process.env.DATABASE_URL);
 const userId = randomUUID();
+
+/** O provedor de IA fora do ar durante a categorização: o 503 que já derrubou lote em produção. */
+class AiForaDoAr implements AiClient {
+  calls = 0;
+  async categorize(): Promise<never> {
+    this.calls++;
+    throw new ProviderUnavailableError("O Gemini está sobrecarregado agora. Tente de novo em alguns minutos.", true);
+  }
+  extractStatement(): never {
+    throw new Error("não usado");
+  }
+  extractReceipt(): never {
+    throw new Error("não usado");
+  }
+}
+
+/** Descrições e FITIDs que nenhuma importação anterior viu: nem regra, nem memória, nem vizinho resolvem. */
+const OFX_INEDITO = `OFXHEADER:100
+<OFX><BANKTRANLIST>
+<STMTTRN><DTPOSTED>20260920<TRNAMT>-15.00<FITID>g1<NAME>PADARIA ESTRELA DO NORTE</STMTTRN>
+<STMTTRN><DTPOSTED>20260921<TRNAMT>-60.00<FITID>g2<NAME>OFICINA MECANICA ZE</STMTTRN>
+</BANKTRANLIST>
+<LEDGERBAL><BALAMT>1000.00<DTASOF>20260921</LEDGERBAL>
+</OFX>`;
 
 const OFX = `OFXHEADER:100
 <OFX><BANKTRANLIST>
@@ -98,5 +124,21 @@ describe.skipIf(!hasDb)("pipeline de importação", () => {
     expect(txs).toHaveLength(1);
     expect(txs[0]).toMatchObject({ id: projectedId, status: "PROJECTED", externalId: null, importBatchId: null, originalDesc: "TED ALUGUEL" });
     expect((await db.account.findUniqueOrThrow({ where: { id: accountId } })).currentBalance).toBe(100_000n);
+  });
+
+  it("IA fora do ar durante a categorização não derruba o lote: linhas intactas, categorias em branco", async () => {
+    const ai = new AiForaDoAr();
+    const inedito = new TextEncoder().encode(OFX_INEDITO);
+    const batch = await forUser(userId, (tx) => startImport(tx, userId, { accountId, fileName: "extrato3.ofx", storageKey: `${userId}/imports/z.ofx`, format: "OFX", bytes: inedito }));
+
+    await expect(processImportBatch(batch.id, inedito, null, { ai })).resolves.toBeUndefined();
+
+    const after = await db.importBatch.findUniqueOrThrow({ where: { id: batch.id } });
+    expect(after.status).toBe("READY_FOR_REVIEW");
+    const rows = readReviewRows(after);
+    expect(rows.map((r) => r.status)).toEqual(["new", "new"]);
+    expect(rows.every((r) => !r.suggestedCategoryId)).toBe(true);
+    // Trava contra falso verde: se a IA nem foi chamada, o teste não provou nada.
+    expect(ai.calls).toBeGreaterThan(0);
   });
 });

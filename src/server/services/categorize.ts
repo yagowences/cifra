@@ -1,7 +1,7 @@
 import "server-only";
 import { Prisma } from "@prisma/client";
 import { z } from "zod";
-import type { AiClient } from "@/ai/client";
+import type { AiClient, CategoryOption } from "@/ai/client";
 import { normalizeDescription } from "@/lib/fingerprint";
 import type { UserDb } from "@/server/db";
 
@@ -118,22 +118,41 @@ export async function categorizeCascade(
   if (pending.size && opts.ai) {
     const categories = await tx.category.findMany({ where: { userId }, select: { id: true, name: true, type: true } });
     const rest = Array.from(pending).map((i) => byIndex.get(i)!);
-    for (let start = 0; start < rest.length; start += LLM_BATCH) {
-      const batch = rest.slice(start, start + LLM_BATCH);
-      const out = await opts.ai.categorize(
-        userId,
-        batch.map((b) => ({ index: b.index, description: b.description, amount: b.amount, date: b.date ?? "" })),
-        categories,
-      );
-      const valid = new Set(categories.map((c) => c.id));
-      for (const r of out.data.results) {
-        if (!pending.has(r.index)) continue;
-        if (r.categoryId && valid.has(r.categoryId)) resolve(r.index, r.categoryId, r.confidence, "llm");
-      }
+    for (const r of await categorizeWithLlm(opts.ai, userId, rest, categories)) {
+      if (pending.has(r.index) && r.categoryId) resolve(r.index, r.categoryId, r.confidence, "llm");
     }
   }
 
   return items.map((i) => results.get(i.index) ?? { index: i.index, categoryId: null, confidence: 0, source: null });
+}
+
+/**
+ * Nível 4 isolado, em lotes de LLM_BATCH. É uma etapa opcional: os níveis anteriores já resolvem a
+ * maior parte, então o provedor fora do ar (503, chave, cota) não pode invalidar quem chamou. Devolve
+ * o que os lotes bem-sucedidos categorizaram; no primeiro lote que falha, avisa e para — se o provedor
+ * caiu, os próximos lotes cairiam também e só arrastariam a espera.
+ */
+export async function categorizeWithLlm(ai: AiClient, userId: string, items: CategorizeItem[], categories: CategoryOption[]): Promise<CategorizeResult[]> {
+  const valid = new Set(categories.map((c) => c.id));
+  const out: CategorizeResult[] = [];
+  for (let start = 0; start < items.length; start += LLM_BATCH) {
+    const batch = items.slice(start, start + LLM_BATCH);
+    const asked = new Set(batch.map((b) => b.index));
+    try {
+      const res = await ai.categorize(
+        userId,
+        batch.map((b) => ({ index: b.index, description: b.description, amount: b.amount, date: b.date ?? "" })),
+        categories,
+      );
+      for (const r of res.data.results) {
+        if (asked.has(r.index) && r.categoryId && valid.has(r.categoryId)) out.push({ index: r.index, categoryId: r.categoryId, confidence: r.confidence, source: "llm" });
+      }
+    } catch (e) {
+      console.warn("[categorize] nível LLM indisponível; seguindo só com o determinístico:", e instanceof Error ? e.message : e);
+      break;
+    }
+  }
+  return out;
 }
 
 /** Quando a mesma correção se repete três vezes, vale virar regra explícita. */
