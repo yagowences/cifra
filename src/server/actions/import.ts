@@ -4,6 +4,7 @@ import type { Prisma } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 import { after } from "next/server";
 import { z } from "zod";
+import { aiEnabled } from "@/ai/models";
 import { hasQueue, inngest } from "@/inngest/client";
 import { requireUserId } from "@/server/auth";
 import { db, forUser } from "@/server/db";
@@ -13,6 +14,8 @@ import { downloadAsUser } from "@/server/storage";
 import type { ActionResult } from "./transactions";
 
 const KNOWN = ["NotFoundError", "ImportError"];
+
+const PDF_SEM_IA = "A leitura de PDF depende da IA, que está desligada neste servidor. Exporte o extrato em OFX ou CSV no app do banco e importe de novo.";
 
 function fail(e: unknown): ActionResult<never> {
   if (e instanceof Error && KNOWN.includes(e.name)) return { ok: false, message: e.message };
@@ -40,6 +43,9 @@ export async function startImportAction(payload: unknown): Promise<ActionResult<
   if (!storageKey.startsWith(`${userId}/`)) return { ok: false, message: "Arquivo fora da sua pasta." };
   const format = formatFromName(fileName);
   if (!format || format === "XLSX") return { ok: false, message: "Importe OFX, CSV ou PDF." };
+  // Autoridade do gating: o dropzone também bloqueia, mas é só cortesia (o cliente pode ser burlado).
+  // Recusar aqui evita um lote que nasce, vira PROCESSING e morre em FAILED por falta de chave.
+  if (format === "PDF" && !aiEnabled()) return { ok: false, message: PDF_SEM_IA };
 
   try {
     const bytes = await downloadAsUser(storageKey);

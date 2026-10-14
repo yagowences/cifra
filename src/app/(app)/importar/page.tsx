@@ -1,5 +1,6 @@
 import { Upload } from "lucide-react";
 import type { Metadata } from "next";
+import { aiEnabled } from "@/ai/models";
 import { EmptyState } from "@/components/empty-state";
 import { Dropzone } from "@/components/import/dropzone";
 import { ListaLotes, type BatchListItem } from "@/components/import/lista-lotes";
@@ -46,7 +47,7 @@ export default async function ImportarPage() {
         />
       ) : (
         <div className="flex flex-col gap-8">
-          <Dropzone accounts={accounts.map((a) => ({ id: a.id, name: a.name, type: a.type }))} userId={userId} />
+          <Dropzone accounts={accounts.map((a) => ({ id: a.id, name: a.name, type: a.type }))} userId={userId} pdfEnabled={aiEnabled()} />
           <ListaLotes batches={items} />
         </div>
       )}

@@ -11,10 +11,14 @@ import { cn } from "@/lib/utils";
 import { startImportAction } from "@/server/actions/import";
 import type { AccountOption } from "@/components/transactions/transaction-sheet-provider";
 
-const ACCEPT = ".ofx,.qfx,.csv,.txt,.pdf";
+const ACCEPT_BASE = ".ofx,.qfx,.csv,.txt";
+const PDF_SEM_IA = "A leitura de PDF por IA está desligada neste servidor. Exporte o extrato em OFX ou CSV no app do banco.";
 
-/** Envio de extrato: escolhe a conta, solta o arquivo, e a revisão abre em seguida. */
-export function Dropzone({ accounts, userId }: { accounts: AccountOption[]; userId: string }) {
+/**
+ * Envio de extrato: escolhe a conta, solta o arquivo, e a revisão abre em seguida.
+ * `pdfEnabled` vem do servidor (ter chave de IA configurada): sem ela o PDF não tem como ser lido.
+ */
+export function Dropzone({ accounts, userId, pdfEnabled }: { accounts: AccountOption[]; userId: string; pdfEnabled: boolean }) {
   const router = useRouter();
   const inputRef = useRef<HTMLInputElement>(null);
   const [accountId, setAccountId] = useState(accounts[0]?.id ?? "");
@@ -25,6 +29,11 @@ export function Dropzone({ accounts, userId }: { accounts: AccountOption[]; user
 
   const submit = () => {
     if (!file || !accountId) return;
+    // `accept` não impede arrastar-e-soltar, então a checagem precisa estar aqui também.
+    if (!pdfEnabled && /\.pdf$/i.test(file.name)) {
+      setError(PDF_SEM_IA);
+      return;
+    }
     setError(null);
     startTransition(async () => {
       try {
@@ -77,7 +86,7 @@ export function Dropzone({ accounts, userId }: { accounts: AccountOption[]; user
           dragging ? "border-brand bg-brand-soft" : "border-border-strong bg-surface-sunken hover:border-brand",
         )}
       >
-        <input ref={inputRef} type="file" accept={ACCEPT} className="sr-only" onChange={(e) => setFile(e.target.files?.[0] ?? null)} data-testid="arquivo" />
+        <input ref={inputRef} type="file" accept={pdfEnabled ? `${ACCEPT_BASE},.pdf` : ACCEPT_BASE} className="sr-only" onChange={(e) => setFile(e.target.files?.[0] ?? null)} data-testid="arquivo" />
         <span className="flex size-10 items-center justify-center rounded-sm bg-brand-soft text-brand">
           {file ? <FileUp strokeWidth={1.5} className="size-5" aria-hidden /> : <Upload strokeWidth={1.5} className="size-5" aria-hidden />}
         </span>
@@ -89,7 +98,9 @@ export function Dropzone({ accounts, userId }: { accounts: AccountOption[]; user
         ) : (
           <>
             <span className="text-body-strong">Solte o extrato aqui ou toque para escolher</span>
-            <span className="text-caption text-ink-secondary">OFX, CSV ou PDF do seu banco. PDF é lido por IA e conferido pelo saldo.</span>
+            <span className="text-caption text-ink-secondary">
+              {pdfEnabled ? "OFX, CSV ou PDF do seu banco. PDF é lido por IA e conferido pelo saldo." : "OFX ou CSV do seu banco. A leitura de PDF por IA está desligada neste servidor."}
+            </span>
           </>
         )}
       </label>
