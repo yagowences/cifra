@@ -25,6 +25,20 @@ describe("friendlyGeminiError", () => {
     expect([401, 403, 429].map(retryable)).toEqual([false, false, false]);
   });
 
+  it("timeout e falha de rede viram mensagem legível e repetível, não o erro cru do fetch", () => {
+    const abort = Object.assign(new Error("This operation was aborted"), { name: "AbortError" });
+    const headers = Object.assign(new TypeError("fetch failed"), { cause: { code: "UND_ERR_HEADERS_TIMEOUT" } });
+    const rede = new TypeError("fetch failed");
+    for (const e of [abort, headers]) {
+      const err = friendlyGeminiError(e) as ProviderUnavailableError;
+      expect(err.message).toContain("demorou demais");
+      expect(err.retryable).toBe(true);
+    }
+    const err = friendlyGeminiError(rede) as ProviderUnavailableError;
+    expect(err.message).toContain("falha de rede");
+    expect(err.retryable).toBe(true);
+  });
+
   it("erro que não é do Google passa intacto", () => {
     const original = new Error("rede caiu");
     expect(friendlyGeminiError(original)).toBe(original);

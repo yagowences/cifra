@@ -42,5 +42,14 @@ export function friendlyGeminiError(e: unknown): Error {
     if (e.status === 429) return new ProviderUnavailableError("Limite gratuito do Gemini atingido por agora; tente mais tarde.");
     if (e.status === 503 || e.status === 502 || e.status === 504) return new ProviderUnavailableError("O Gemini está sobrecarregado agora. Tente de novo em alguns minutos.", true);
   }
+  if (isTimeout(e)) return new ProviderUnavailableError("O Gemini demorou demais para responder. Tente de novo em instantes.", true);
+  if (e instanceof TypeError && e.message === "fetch failed") return new ProviderUnavailableError("Não consegui falar com o Gemini (falha de rede). Tente de novo em instantes.", true);
   return e instanceof Error ? e : new Error(String(e));
+}
+
+/** O teto de tempo do cliente aborta o fetch; o undici também tem os seus próprios timeouts. */
+function isTimeout(e: unknown): boolean {
+  if (!(e instanceof Error)) return false;
+  const code = (e as { cause?: { code?: string } }).cause?.code;
+  return e.name === "AbortError" || e.name === "TimeoutError" || code === "UND_ERR_HEADERS_TIMEOUT" || code === "UND_ERR_BODY_TIMEOUT" || code === "UND_ERR_CONNECT_TIMEOUT";
 }

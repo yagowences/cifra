@@ -70,8 +70,12 @@ export type AiClientOptions = {
 
 const RATE_PER_MINUTE = 20;
 const TRANSIENT_BACKOFF_MS = [1_000, 3_000];
-/** Passado isto desde a primeira tentativa, não começa outra: o cliente do provedor já tem timeout próprio. */
-const TRANSIENT_BUDGET_MS = 45_000;
+/**
+ * Passado isto desde a primeira tentativa, não começa outra. Só vale repetir quando a sobrecarga
+ * volta rápido: com cada chamada limitada a 30 s e a function da Netlify a 60 s no total, uma
+ * segunda tentativa começada tarde não teria tempo de terminar.
+ */
+const TRANSIENT_BUDGET_MS = 10_000;
 
 const sha256 = (s: string) => createHash("sha256").update(s).digest("hex");
 
