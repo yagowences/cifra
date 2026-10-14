@@ -21,6 +21,15 @@ const base = DEFAULTS[AI_PROVIDER];
 /** Se a chave do provedor ativo está configurada — controla o que as telas de IA mostram. */
 export const aiEnabled = () => Boolean(AI_PROVIDER === "anthropic" ? process.env.ANTHROPIC_API_KEY : process.env.GOOGLE_API_KEY);
 
+/**
+ * Nível 4 (LLM) da categorização na importação. Desligado por padrão, de propósito: os níveis 1-3
+ * da cascata já acertam 85%+ sem gastar chamada e o que sobra vai em branco para a revisão. Ter a
+ * chave configurada (para ler PDF) não pode ligar, de quebra, chamadas de IA em toda importação de
+ * OFX/CSV, que nem precisam dela — cada chamada é uma chance de 503 e uma fatia da cota gratuita.
+ * Ligue com AI_CATEGORIZE_IMPORT=1.
+ */
+export const importLlmCategorizationEnabled = () => aiEnabled() && process.env.AI_CATEGORIZE_IMPORT === "1";
+
 /** `.env` com a chave presente mas vazia vira string vazia, não undefined: trata os dois como "não definido". */
 const envOr = (value: string | undefined, fallback: string) => (value && value.trim() ? value : fallback);
 

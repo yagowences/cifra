@@ -4,10 +4,10 @@ import { Prisma, type ImportFormat } from "@prisma/client";
 import { addDays, fromISODate, toISODate } from "@/lib/dates";
 import { fingerprint, normalizeDescription } from "@/lib/fingerprint";
 import { db, forUser, type UserDb } from "@/server/db";
-import { categorizeCascade } from "@/server/services/categorize";
+import { categorizeCascade, categorizeWithLlm } from "@/server/services/categorize";
 import { NotFoundError } from "@/server/services/transactions";
 import { createAiClient, type AiClient, type BankHint } from "@/ai/client";
-import { aiEnabled } from "@/ai/models";
+import { importLlmCategorizationEnabled } from "@/ai/models";
 import { dedupeRows, type ExistingTx } from "./dedupe";
 import { parseCsv, previewCsv } from "./parsers/csv";
 import { decodeOfx, parseOfx } from "./parsers/ofx";
@@ -120,16 +120,15 @@ export async function processImportBatch(batchId: string, bytes: Uint8Array, map
 
       const deduped = dedupeRows(parsedRows, existing, { accountId: batch.accountId });
 
-      // Categorização em cascata (regra → memória → vizinhos → LLM só com chave configurada).
-      // "ai" in deps distingue "não informado" (usa o padrão) de "null explícito" (desliga,
-      // como os testes de OFX/CSV fazem para nunca gastar chamada real por engano).
+      // Categorização determinística (regra → memória → vizinhos). O nível LLM fica de fora de
+      // propósito: aqui dentro há uma transação aberta, com teto de 60 s, e uma chamada de rede
+      // seguraria a conexão do pooler e poderia estourar esse teto. Ele roda depois do commit.
       const candidates = deduped.filter((r) => r.status !== "duplicate");
-      const ai = "ai" in deps ? deps.ai! : aiEnabled() ? createAiClient() : null;
       const results = await categorizeCascade(
         tx,
         userId,
         candidates.map((r, index) => ({ index, description: r.description, amount: r.amount, date: r.date })),
-        { ai },
+        { ai: null },
       );
       const byKey = new Map(candidates.map((r, index) => [r.key, results[index]]));
       return deduped.map((r) => {
@@ -175,6 +174,18 @@ export async function processImportBatch(batchId: string, bytes: Uint8Array, map
         parserVersion: `${batch.format.toLowerCase()}-1`,
       },
     });
+
+    // Enriquecimento opcional por LLM, depois do lote já estar pronto: nunca o invalida. "ai" in deps
+    // distingue "não informado" (usa o padrão) de "null explícito" (desliga, como os testes de OFX/CSV
+    // fazem para nunca gastar chamada real por engano).
+    const ai = "ai" in deps ? deps.ai! : importLlmCategorizationEnabled() ? createAiClient() : null;
+    if (ai) {
+      try {
+        await suggestRemainingWithLlm(batchId, userId, ai);
+      } catch (e) {
+        console.warn("[import] categorização por LLM falhou; lote mantido em revisão:", e instanceof Error ? e.message : e);
+      }
+    }
   } catch (e) {
     await db.importBatch.update({
       where: { id: batchId },
@@ -182,6 +193,35 @@ export async function processImportBatch(batchId: string, bytes: Uint8Array, map
     });
     throw e;
   }
+}
+
+/**
+ * Sugere categoria por LLM só para as linhas que a cascata determinística deixou em branco. Roda fora
+ * de transação e depois do commit; só mexe em lote ainda em revisão — se a pessoa confirmou enquanto
+ * a IA respondia, a escrita condicional simplesmente não acontece.
+ */
+async function suggestRemainingWithLlm(batchId: string, userId: string, ai: AiClient) {
+  const batch = await db.importBatch.findUnique({ where: { id: batchId } });
+  if (!batch || batch.status !== "READY_FOR_REVIEW") return;
+  const rows = readReviewRows(batch);
+  const pending = rows.map((r, index) => ({ r, index })).filter(({ r }) => r.status !== "duplicate" && !r.suggestedCategoryId);
+  if (!pending.length) return;
+
+  const categories = await forUser(userId, (tx) => tx.category.findMany({ where: { userId }, select: { id: true, name: true, type: true } }));
+  const found = await categorizeWithLlm(
+    ai,
+    userId,
+    pending.map(({ r, index }) => ({ index, description: r.description, amount: r.amount, date: r.date })),
+    categories,
+  );
+  if (!found.length) return;
+
+  const byIndex = new Map(found.map((f) => [f.index, f]));
+  const merged = rows.map((r, index) => {
+    const hit = byIndex.get(index);
+    return hit?.categoryId ? { ...r, suggestedCategoryId: hit.categoryId, confidence: hit.confidence } : r;
+  });
+  await db.importBatch.updateMany({ where: { id: batchId, status: "READY_FOR_REVIEW" }, data: { rows: merged } });
 }
 
 export function readReviewRows(batch: { rows: Prisma.JsonValue }): ReviewRow[] {

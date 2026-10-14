@@ -3,9 +3,10 @@
  * casada vira a própria transação; desfazer remove tudo e devolve a previsão.
  */
 import { randomUUID } from "node:crypto";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import type { AiClient } from "@/ai/client";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import type { AiClient, Extracted } from "@/ai/client";
 import { ProviderUnavailableError } from "@/ai/providers/errors";
+import type { Categorized } from "@/ai/schemas/categorize";
 import { db, forUser } from "@/server/db";
 import { createAccount } from "@/server/services/accounts";
 import { createTransaction } from "@/server/services/transactions";
@@ -28,6 +29,29 @@ class AiForaDoAr implements AiClient {
     throw new Error("não usado");
   }
 }
+
+/** IA disponível: sugere a mesma categoria para tudo que lhe mandarem. */
+class AiCategoriza implements AiClient {
+  calls = 0;
+  constructor(private categoryId: string) {}
+  async categorize(_userId: string, txs: { index: number }[]): Promise<Extracted<Categorized>> {
+    this.calls++;
+    return { data: { results: txs.map((t) => ({ index: t.index, categoryId: this.categoryId, confidence: 0.8 })) }, model: "fake", costCents: 0, cached: false };
+  }
+  extractStatement(): never {
+    throw new Error("não usado");
+  }
+  extractReceipt(): never {
+    throw new Error("não usado");
+  }
+}
+
+const ofxCom = (fitid: string, dia: string, nome: string) => `OFXHEADER:100
+<OFX><BANKTRANLIST>
+<STMTTRN><DTPOSTED>${dia}<TRNAMT>-20.00<FITID>${fitid}<NAME>${nome}</STMTTRN>
+</BANKTRANLIST>
+<LEDGERBAL><BALAMT>1000.00<DTASOF>${dia}</LEDGERBAL>
+</OFX>`;
 
 /** Descrições e FITIDs que nenhuma importação anterior viu: nem regra, nem memória, nem vizinho resolvem. */
 const OFX_INEDITO = `OFXHEADER:100
@@ -140,5 +164,38 @@ describe.skipIf(!hasDb)("pipeline de importação", () => {
     expect(rows.every((r) => !r.suggestedCategoryId)).toBe(true);
     // Trava contra falso verde: se a IA nem foi chamada, o teste não provou nada.
     expect(ai.calls).toBeGreaterThan(0);
+  });
+
+  it("IA disponível: as sugestões entram depois do commit, só nas linhas que ficaram sem categoria", async () => {
+    const categoria = await db.category.findFirstOrThrow({ where: { userId, type: "EXPENSE" } });
+    const ai = new AiCategoriza(categoria.id);
+    const arquivo = new TextEncoder().encode(ofxCom("h1", "20260922", "MERCEARIA DO BAIRRO 77"));
+    const batch = await forUser(userId, (tx) => startImport(tx, userId, { accountId, fileName: "extrato4.ofx", storageKey: `${userId}/imports/w.ofx`, format: "OFX", bytes: arquivo }));
+
+    await processImportBatch(batch.id, arquivo, null, { ai });
+
+    const rows = readReviewRows(await db.importBatch.findUniqueOrThrow({ where: { id: batch.id } }));
+    expect(ai.calls).toBe(1);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].suggestedCategoryId).toBe(categoria.id);
+  });
+
+  it("com a chave configurada e AI_CATEGORIZE_IMPORT desligada, importar não chama IA nenhuma", async () => {
+    // Chave presente é o caso de produção (precisa dela para ler PDF); sem a flag, OFX/CSV ficam sem rede.
+    vi.stubEnv("GOOGLE_API_KEY", "chave-falsa-so-para-ligar-o-aiEnabled");
+    vi.stubEnv("AI_CATEGORIZE_IMPORT", "");
+    try {
+      const antes = await db.aiUsageLog.count({ where: { userId } });
+      const arquivo = new TextEncoder().encode(ofxCom("h2", "20260923", "BARBEARIA CLASSICA CENTRO"));
+      const batch = await forUser(userId, (tx) => startImport(tx, userId, { accountId, fileName: "extrato5.ofx", storageKey: `${userId}/imports/v.ofx`, format: "OFX", bytes: arquivo }));
+
+      await processImportBatch(batch.id, arquivo, null);
+
+      expect((await db.importBatch.findUniqueOrThrow({ where: { id: batch.id } })).status).toBe("READY_FOR_REVIEW");
+      // Qualquer tentativa de chamada (mesmo falhando) gravaria uma linha de uso.
+      expect(await db.aiUsageLog.count({ where: { userId } })).toBe(antes);
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 });
