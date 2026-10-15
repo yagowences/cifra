@@ -83,7 +83,7 @@ export function ListaLotes({ batches }: { batches: BatchListItem[] }) {
                   <Undo2 strokeWidth={1.5} aria-hidden /> Desfazer
                 </button>
               )}
-              {(b.status === "FAILED" || b.status === "UNDONE") && (
+              {b.status !== "CONFIRMED" && (
                 <button
                   type="button"
                   aria-label={`Apagar ${b.fileName}`}

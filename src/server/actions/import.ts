@@ -1,6 +1,6 @@
 "use server";
 
-import type { Prisma } from "@prisma/client";
+import { Prisma } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 import { after } from "next/server";
 import { z } from "zod";
@@ -97,6 +97,32 @@ export async function retryImportAction(batchId: string): Promise<ActionResult> 
     const bytes = await downloadAsUser(batch.storageKey);
     // Volta para PENDING na hora: renova o updatedAt, senão a página ainda o veria como preso.
     await db.importBatch.update({ where: { id: batchId }, data: { status: "PENDING", error: null } });
+    await dispatchProcessing(batch.id, bytes, batch.format);
+    revalidate();
+    return { ok: true, data: undefined };
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+/**
+ * Troca a conta de um lote que ainda não foi confirmado e o relê: a conta decide o sinal dos valores
+ * (cartão vs. corrente) e contra quais lançamentos procurar duplicatas, então não basta trocar o id.
+ */
+export async function changeBatchAccountAction(batchId: string, accountId: string): Promise<ActionResult> {
+  const userId = await requireUserId();
+  try {
+    const batch = await db.importBatch.findFirst({ where: { id: batchId, userId } });
+    if (!batch) return { ok: false, message: "Lote não encontrado." };
+    if (batch.status === "CONFIRMED" || batch.status === "UNDONE") return { ok: false, message: "Este lote já foi concluído; desfaça a importação antes de mudar a conta." };
+    if ((batch.status === "PENDING" || batch.status === "PROCESSING") && !isStaleProcessing(batch)) return { ok: false, message: "Aguarde a leitura terminar para trocar a conta." };
+    if (batch.accountId === accountId) return { ok: true, data: undefined };
+    const account = await db.account.findFirst({ where: { id: accountId, userId }, select: { id: true } });
+    if (!account) return { ok: false, message: "Conta não encontrada." };
+    if (batch.format === "PDF" && !aiEnabled()) return { ok: false, message: PDF_SEM_IA };
+
+    const bytes = await downloadAsUser(batch.storageKey);
+    await db.importBatch.update({ where: { id: batchId }, data: { accountId, status: "PENDING", error: null, rows: Prisma.JsonNull } });
     await dispatchProcessing(batch.id, bytes, batch.format);
     revalidate();
     return { ok: true, data: undefined };

@@ -252,47 +252,51 @@ export async function confirmImport(tx: UserDb, userId: string, batchId: string,
   const chosen = accepted.map((a) => ({ a, row: byKey.get(a.key) })).filter((x): x is { a: AcceptedRow; row: ReviewRow } => Boolean(x.row));
   if (chosen.some((c) => c.row.status === "duplicate")) throw new ImportError("Duplicata exata não pode ser importada.");
 
-  let created = 0;
-  let matched = 0;
+  // Operações em bloco: em produção cada ida ao banco custa ~130 ms (function nos EUA, banco em São
+  // Paulo), e uma criação por linha levava 17 s só em teste local — acima dos 30 s da Netlify numa
+  // fatura de 72 linhas, o que derrubava a aprovação.
+  const matchedRows = chosen.filter((c) => c.row.status === "matched" && c.row.matchId);
+  const newRows = chosen.filter((c) => !(c.row.status === "matched" && c.row.matchId));
+  const created = newRows.length;
+  const matched = matchedRows.length;
   try {
-    for (const { a, row } of chosen) {
-      const amount = BigInt(row.amount);
-      if (row.status === "matched" && row.matchId) {
-        await tx.transaction.update({
-          where: { id: row.matchId },
-          data: {
-            status: "CONFIRMED",
-            competenceDate: fromISODate(row.date),
-            externalId: row.externalId,
-            originalDesc: row.description,
-            importBatchId: batchId,
-            reviewed: true,
-            ...(a.categoryId ? { categoryId: a.categoryId } : {}),
-          },
-        });
-        matched++;
-        continue;
-      }
-      await tx.transaction.create({
+    for (const { a, row } of matchedRows) {
+      await tx.transaction.update({
+        where: { id: row.matchId! },
         data: {
-          userId,
-          accountId: batch.accountId,
-          categoryId: a.categoryId ?? row.suggestedCategoryId ?? null,
-          amount,
-          type: amount >= 0n ? "INCOME" : "EXPENSE",
-          competenceDate: fromISODate(row.date),
-          description: row.description,
-          originalDesc: row.description,
-          notes: row.memo,
           status: "CONFIRMED",
-          source: "IMPORT",
+          competenceDate: fromISODate(row.date),
           externalId: row.externalId,
+          originalDesc: row.description,
           importBatchId: batchId,
           reviewed: true,
-          fingerprint: fingerprint({ accountId: batch.accountId, competenceDate: row.date, amount, description: row.description }),
+          ...(a.categoryId ? { categoryId: a.categoryId } : {}),
         },
       });
-      created++;
+    }
+    if (newRows.length) {
+      await tx.transaction.createMany({
+        data: newRows.map(({ a, row }) => {
+          const amount = BigInt(row.amount);
+          return {
+            userId,
+            accountId: batch.accountId,
+            categoryId: a.categoryId ?? row.suggestedCategoryId ?? null,
+            amount,
+            type: amount >= 0n ? ("INCOME" as const) : ("EXPENSE" as const),
+            competenceDate: fromISODate(row.date),
+            description: row.description,
+            originalDesc: row.description,
+            notes: row.memo,
+            status: "CONFIRMED" as const,
+            source: "IMPORT" as const,
+            externalId: row.externalId,
+            importBatchId: batchId,
+            reviewed: true,
+            fingerprint: fingerprint({ accountId: batch.accountId, competenceDate: row.date, amount, description: row.description }),
+          };
+        }),
+      });
     }
   } catch (e) {
     if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
@@ -301,15 +305,24 @@ export async function confirmImport(tx: UserDb, userId: string, batchId: string,
     throw e;
   }
 
-  const rememberable = chosen.filter((c) => c.a.categoryId && c.row.status !== "duplicate");
-  for (const { a, row } of rememberable) {
+  // Memória de comerciante numa instrução só: vale a última categoria escolhida por descrição e cada
+  // ocorrência soma um acerto (a primeira cria com 1).
+  const remembered = new Map<string, { categoryId: string; n: number }>();
+  for (const { a, row } of chosen) {
+    if (!a.categoryId || row.status === "duplicate") continue;
     const normalizedDesc = normalizeDescription(row.description);
     if (!normalizedDesc) continue;
-    await tx.merchantMemory.upsert({
-      where: { userId_normalizedDesc: { userId, normalizedDesc } },
-      create: { userId, normalizedDesc, categoryId: a.categoryId! },
-      update: { categoryId: a.categoryId!, hitCount: { increment: 1 } },
-    });
+    remembered.set(normalizedDesc, { categoryId: a.categoryId, n: (remembered.get(normalizedDesc)?.n ?? 0) + 1 });
+  }
+  if (remembered.size) {
+    const entries = Array.from(remembered, ([normalizedDesc, v]) => ({ d: normalizedDesc, c: v.categoryId, n: v.n }));
+    await tx.$executeRaw`
+      insert into public.merchant_memory (id, user_id, normalized_desc, category_id, hit_count, updated_at)
+      select gen_random_uuid()::text, ${userId}::uuid, x.d, x.c, x.n, now()
+      from jsonb_to_recordset(${JSON.stringify(entries)}::jsonb) as x(d text, c text, n int)
+      on conflict (user_id, normalized_desc)
+      do update set category_id = excluded.category_id, hit_count = public.merchant_memory.hit_count + excluded.hit_count, updated_at = now()
+    `;
   }
 
   await tx.auditLog.create({ data: { userId, entity: "import_batch", entityId: batchId, action: "CREATE", source: "IMPORT", diff: { created, matched } } });

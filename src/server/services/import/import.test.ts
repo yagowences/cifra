@@ -198,4 +198,30 @@ describe.skipIf(!hasDb)("pipeline de importação", () => {
       vi.unstubAllEnvs();
     }
   });
+  it("aprovar grava a memória de comerciante em bloco: uma linha por descrição, somando os acertos", async () => {
+    const ofx = (ids: string[], day: number) => new TextEncoder().encode(`OFXHEADER:100
+<OFX><BANKTRANLIST>
+${ids.map((id, i) => `<STMTTRN><DTPOSTED>202610${String(day + i).padStart(2, "0")}<TRNAMT>-11.00<FITID>${id}<NAME>MERCADO DO ZE</STMTTRN>`).join("\n")}
+</BANKTRANLIST>
+<LEDGERBAL><BALAMT>0.00<DTASOF>20261020</LEDGERBAL>
+</OFX>`);
+    const category = await forUser(userId, (tx) => tx.category.findFirstOrThrow({ where: { userId, type: "EXPENSE" } }));
+    const run = async (ids: string[], day: number) => {
+      const file = ofx(ids, day);
+      const batch = await forUser(userId, (tx) => startImport(tx, userId, { accountId, fileName: "m.ofx", storageKey: `${userId}/imports/m-${ids[0]}.ofx`, format: "OFX", bytes: file }));
+      await processImportBatch(batch.id, file, null, { ai: null });
+      const rows = readReviewRows(await db.importBatch.findUniqueOrThrow({ where: { id: batch.id } }));
+      await forUser(userId, (tx) => confirmImport(tx, userId, batch.id, rows.map((r) => ({ key: r.key, categoryId: category.id }))));
+    };
+
+    await run(["m1", "m2"], 11);
+    const afterFirst = await db.merchantMemory.findMany({ where: { userId, categoryId: category.id } });
+    expect(afterFirst).toHaveLength(1);
+    expect(afterFirst[0].hitCount).toBe(2);
+
+    await run(["m3"], 20);
+    const afterSecond = await db.merchantMemory.findMany({ where: { userId, categoryId: category.id } });
+    expect(afterSecond).toHaveLength(1);
+    expect(afterSecond[0].hitCount).toBe(3);
+  });
 });

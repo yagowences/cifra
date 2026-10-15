@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { botaoVariants } from "@/components/botao";
+import { AcoesLote } from "@/components/import/acoes-lote";
 import { EmptyState } from "@/components/empty-state";
 import { MapeadorColunas } from "@/components/import/mapeador-colunas";
 import { ProcessingPoller } from "@/components/import/processing-poller";
@@ -29,11 +30,12 @@ export default async function RevisaoImportacaoPage({ params }: { params: Promis
       orderBy: [{ type: "desc" }, { sortOrder: "asc" }],
       select: { id: true, name: true, type: true, icon: true, color: true },
     });
-    return { batch, categories };
+    const accounts = await tx.account.findMany({ where: { userId }, orderBy: { name: "asc" }, select: { id: true, name: true } });
+    return { batch, categories, accounts };
   });
 
   if (!data) notFound();
-  const { batch, categories } = data;
+  const { batch, categories, accounts } = data;
   const rows = readReviewRows(batch);
   const month = (rows[0]?.date ?? new Date().toISOString()).slice(0, 7);
   const steps = ["Envio", "Leitura", "Revisão", "Confirmação"];
@@ -97,6 +99,10 @@ export default async function RevisaoImportacaoPage({ params }: { params: Promis
           </div>
         )}
       </div>
+
+      {batch.status !== "CONFIRMED" && batch.status !== "UNDONE" && (
+        <AcoesLote batchId={batch.id} accountId={batch.accountId} accounts={accounts} running={(batch.status === "PENDING" || batch.status === "PROCESSING") && !stale} />
+      )}
 
       {batch.error && batch.status !== "FAILED" && (
         <div className="mb-5 flex items-start gap-3 rounded-lg bg-warning-soft px-4 py-3 text-caption">
