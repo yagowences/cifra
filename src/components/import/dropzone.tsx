@@ -1,8 +1,7 @@
 "use client";
 
 import { FileUp, Upload } from "lucide-react";
-import { useRouter } from "next/navigation";
-import { useRef, useState, useTransition } from "react";
+import { useRef, useState } from "react";
 import { toast } from "sonner";
 import { Botao } from "@/components/botao";
 import { Field, NativeSelect } from "@/components/form";
@@ -19,13 +18,12 @@ const PDF_SEM_IA = "A leitura de PDF por IA está desligada neste servidor. Expo
  * `pdfEnabled` vem do servidor (ter chave de IA configurada): sem ela o PDF não tem como ser lido.
  */
 export function Dropzone({ accounts, userId, pdfEnabled }: { accounts: AccountOption[]; userId: string; pdfEnabled: boolean }) {
-  const router = useRouter();
   const inputRef = useRef<HTMLInputElement>(null);
   const [accountId, setAccountId] = useState(accounts[0]?.id ?? "");
   const [file, setFile] = useState<File | null>(null);
   const [dragging, setDragging] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [pending, startTransition] = useTransition();
+  const [pending, setPending] = useState(false);
 
   const submit = () => {
     if (!file || !accountId) return;
@@ -35,20 +33,25 @@ export function Dropzone({ accounts, userId, pdfEnabled }: { accounts: AccountOp
       return;
     }
     setError(null);
-    startTransition(async () => {
+    setPending(true);
+    void (async () => {
       try {
         const storageKey = await uploadImportFile(file, userId);
         const result = await startImportAction({ accountId, storageKey, fileName: file.name });
         if (!result.ok) {
           setError(result.message);
+          setPending(false);
           return;
         }
         toast.success("Arquivo recebido.");
-        router.push(`/importar/${result.data.batchId}`);
+        // Navegação completa, não `router.push`: a leitura de PDF roda dentro desta ação e leva meio
+        // minuto; em produção a tela ficou parada depois disso e só o F5 mostrava o lote.
+        window.location.assign(`/importar/${result.data.batchId}`);
       } catch (e) {
         setError(e instanceof Error ? e.message : "Falha no envio.");
+        setPending(false);
       }
-    });
+    })();
   };
 
   return (

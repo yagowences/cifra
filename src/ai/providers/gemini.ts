@@ -19,10 +19,10 @@ export class GeminiProvider implements LlmProvider {
       throw new ProviderUnavailableError("GOOGLE_API_KEY ausente: a extração por IA está desligada.");
     }
     // Sem timeout, uma rede instável deixa a chamada pendurada por minutos (visto: HeadersTimeoutError
-    // do undici bem depois de 60s). O teto também precisa caber no limite de 60 s de execução de uma
-    // function da Netlify, que não é configurável: se a chamada passasse disso, a function seria
-    // encerrada no meio do `after()` e o lote ficaria em "Lendo…" sem nunca falhar.
-    this.client ??= createGeminiClient(process.env.GOOGLE_API_KEY, 30_000);
+    // do undici bem depois de 60s). O teto também precisa caber no limite de execução de uma function
+    // da Netlify, que não é configurável e na prática é de ~30 s (visto: 502 aos 30,6 s). A leitura de
+    // uma fatura de 72 linhas leva 12-16 s; 20 s deixa folga para enviar, salvar e responder.
+    this.client ??= createGeminiClient(process.env.GOOGLE_API_KEY, 20_000);
     return this.client;
   }
 

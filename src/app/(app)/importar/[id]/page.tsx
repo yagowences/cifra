@@ -110,7 +110,7 @@ export default async function RevisaoImportacaoPage({ params }: { params: Promis
 
       {(batch.status === "PENDING" || batch.status === "PROCESSING") && !stale && (
         <>
-          <ProcessingPoller />
+          <ProcessingPoller batchId={batch.id} />
           <div aria-busy="true" className="flex flex-col gap-3">
             <p className="text-body text-ink-secondary">Lendo os lançamentos…</p>
             {Array.from({ length: 6 }, (_, i) => (

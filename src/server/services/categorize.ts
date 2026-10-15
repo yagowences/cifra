@@ -83,34 +83,45 @@ export async function categorizeCascade(
     }
   }
 
-  // 3. Vizinhos no histórico do próprio usuário, por similaridade de trigramas.
+  // 3. Vizinhos no histórico do próprio usuário, por similaridade de trigramas. Uma consulta só para
+  // todos os pendentes: em produção cada ida ao banco custa ~130 ms (a function fica nos EUA, o banco
+  // em São Paulo), e uma consulta por linha estourava o limite de 30 s da Netlify numa fatura de 72 linhas.
   if (pending.size) {
     const threshold = opts.knnThreshold ?? KNN_THRESHOLD;
-    for (const index of Array.from(pending)) {
+    const queries = Array.from(pending).flatMap((index) => {
       const item = byIndex.get(index)!;
       const q = normalizeDescription(item.description);
-      if (!q) continue;
+      if (!q) return [];
       // Palavras significativas do que chegou: "cinemark flamboyant" ainda casa com "cinemark".
       const tokens = q.split(" ").filter((t) => t.length >= 4 && !/^\d+$/.test(t));
-      const rows = await tx.$queryRaw<{ category_id: string; score: number; votes: bigint }[]>`
-        with hist as (
-          select t.category_id,
-            extensions.similarity(lower(t.description), ${q}) as sim,
-            (regexp_split_to_array(lower(t.description), '[^a-z0-9]+') && ${tokens}::text[]) as token_hit
-          from public.transactions t
-          where t.user_id = ${userId}::uuid
-            and t.category_id is not null
-            and t.type = ${item.amount.startsWith("-") ? "EXPENSE" : "INCOME"}::public.tx_type
+      return [{ idx: index, q, kind: item.amount.startsWith("-") ? "EXPENSE" : "INCOME", tokens }];
+    });
+    if (queries.length) {
+      const rows = await tx.$queryRaw<{ idx: number; category_id: string; score: number }[]>`
+        with q as (
+          select * from jsonb_to_recordset(${JSON.stringify(queries)}::jsonb) as x(idx int, q text, kind text, tokens text[])
+        ),
+        hist as (
+          select q.idx, t.category_id,
+            extensions.similarity(lower(t.description), q.q) as sim,
+            (regexp_split_to_array(lower(t.description), '[^a-z0-9]+') && q.tokens) as token_hit
+          from q
+          join public.transactions t
+            on t.user_id = ${userId}::uuid
+           and t.category_id is not null
+           and t.type = q.kind::public.tx_type
+        ),
+        agg as (
+          select idx, category_id, max(greatest(sim, case when token_hit then 0.6 else 0 end))::float as score, count(*)::bigint as votes
+          from hist
+          where sim >= ${threshold} or token_hit
+          group by idx, category_id
         )
-        select category_id, max(greatest(sim, case when token_hit then 0.6 else 0 end))::float as score, count(*)::bigint as votes
-        from hist
-        where sim >= ${threshold} or token_hit
-        group by category_id
-        order by score desc, votes desc
-        limit 1
+        select distinct on (idx) idx, category_id, score
+        from agg
+        order by idx, score desc, votes desc
       `;
-      const best = rows[0];
-      if (best) resolve(index, best.category_id, Math.min(0.9, Number(best.score)), "knn");
+      for (const best of rows) resolve(best.idx, best.category_id, Math.min(0.9, Number(best.score)), "knn");
     }
   }
 
