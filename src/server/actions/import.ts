@@ -50,7 +50,7 @@ export async function startImportAction(payload: unknown): Promise<ActionResult<
   try {
     const bytes = await downloadAsUser(storageKey);
     const batch = await forUser(userId, (tx) => startImport(tx, userId, { accountId, storageKey, fileName, format, bytes }));
-    await dispatchProcessing(batch.id, bytes);
+    await dispatchProcessing(batch.id, bytes, format);
     revalidate();
     return { ok: true, data: { batchId: batch.id } };
   } catch (e) {
@@ -58,19 +58,27 @@ export async function startImportAction(payload: unknown): Promise<ActionResult<
   }
 }
 
-/** Fila (Inngest) quando configurada; senão roda depois da resposta, no próprio servidor. */
-async function dispatchProcessing(batchId: string, bytes: Uint8Array) {
+/**
+ * Fila (Inngest) quando configurada. Sem fila, OFX/CSV (rápidos) rodam depois da resposta, no
+ * próprio servidor. PDF roda dentro da requisição: a leitura por IA leva 15 s ou mais, e em produção
+ * (Netlify) o `after()` foi cortado nesse intervalo — o lote ficou em "Lendo…" sem chamada ao Gemini
+ * registrada e sem erro. Aguardar aqui mantém a function viva (a chamada tem teto de 30 s, dentro
+ * dos 60 s da plataforma) e a pessoa só vê o resultado quando ele existe.
+ */
+async function dispatchProcessing(batchId: string, bytes: Uint8Array, format: string) {
   if (hasQueue()) {
     await inngest.send({ name: "import/batch.created", data: { batchId } });
     return;
   }
-  after(async () => {
+  const run = async () => {
     try {
       await processImportBatch(batchId, bytes);
     } catch (e) {
       console.error("processImportBatch", e);
     }
-  });
+  };
+  if (format === "PDF") await run();
+  else after(run);
 }
 
 /**
@@ -89,7 +97,7 @@ export async function retryImportAction(batchId: string): Promise<ActionResult> 
     const bytes = await downloadAsUser(batch.storageKey);
     // Volta para PENDING na hora: renova o updatedAt, senão a página ainda o veria como preso.
     await db.importBatch.update({ where: { id: batchId }, data: { status: "PENDING", error: null } });
-    await dispatchProcessing(batch.id, bytes);
+    await dispatchProcessing(batch.id, bytes, batch.format);
     revalidate();
     return { ok: true, data: undefined };
   } catch (e) {

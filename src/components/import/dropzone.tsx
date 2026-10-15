@@ -43,7 +43,7 @@ export function Dropzone({ accounts, userId, pdfEnabled }: { accounts: AccountOp
           setError(result.message);
           return;
         }
-        toast.success("Arquivo enviado. Lendo os lançamentos…");
+        toast.success("Arquivo recebido.");
         router.push(`/importar/${result.data.batchId}`);
       } catch (e) {
         setError(e instanceof Error ? e.message : "Falha no envio.");
