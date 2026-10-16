@@ -252,6 +252,8 @@ model Transaction {
   aiConfidence      Float?    @map("ai_confidence")
   notes             String?
   reviewed          Boolean   @default(true)
+  /// Crédito que abate despesa (estorno, resgate de pontos, cashback): INCOME que não conta como receita.
+  isRefund          Boolean   @default(false) @map("is_refund")
   createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz
   updatedAt         DateTime  @updatedAt @map("updated_at") @db.Timestamptz
 

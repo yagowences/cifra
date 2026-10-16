@@ -30,7 +30,7 @@ export default async function RevisaoImportacaoPage({ params }: { params: Promis
       orderBy: [{ type: "desc" }, { sortOrder: "asc" }],
       select: { id: true, name: true, type: true, icon: true, color: true },
     });
-    const accounts = await tx.account.findMany({ where: { userId }, orderBy: { name: "asc" }, select: { id: true, name: true } });
+    const accounts = await tx.account.findMany({ where: { userId }, orderBy: { name: "asc" }, select: { id: true, name: true, type: true } });
     return { batch, categories, accounts };
   });
 
@@ -137,7 +137,7 @@ export default async function RevisaoImportacaoPage({ params }: { params: Promis
         (rows.length === 0 ? (
           <EmptyState icon={FileSearch} title="Nenhum lançamento lido" description="O arquivo não trouxe lançamentos que eu conseguisse entender." action={{ href: "/importar", label: "Enviar outro arquivo" }} />
         ) : (
-          <TabelaRevisao batchId={batch.id} rows={rows} categories={categories} month={month} />
+          <TabelaRevisao batchId={batch.id} rows={rows} categories={categories} month={month} accounts={accounts} />
         ))}
 
       {batch.status === "CONFIRMED" && (

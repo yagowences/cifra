@@ -116,7 +116,6 @@ export async function changeBatchAccountAction(batchId: string, accountId: strin
     if (!batch) return { ok: false, message: "Lote não encontrado." };
     if (batch.status === "CONFIRMED" || batch.status === "UNDONE") return { ok: false, message: "Este lote já foi concluído; desfaça a importação antes de mudar a conta." };
     if ((batch.status === "PENDING" || batch.status === "PROCESSING") && !isStaleProcessing(batch)) return { ok: false, message: "Aguarde a leitura terminar para trocar a conta." };
-    if (batch.accountId === accountId) return { ok: true, data: undefined };
     const account = await db.account.findFirst({ where: { id: accountId, userId }, select: { id: true } });
     if (!account) return { ok: false, message: "Conta não encontrada." };
     if (batch.format === "PDF" && !aiEnabled()) return { ok: false, message: PDF_SEM_IA };
@@ -165,7 +164,7 @@ async function currentMappings(userId: string): Promise<Record<string, unknown>>
 
 const confirmSchema = z.object({
   batchId: z.string().min(1),
-  accepted: z.array(z.object({ key: z.string().min(1), categoryId: z.string().min(1).nullable() })).min(1, "Selecione ao menos um lançamento."),
+  accepted: z.array(z.object({ key: z.string().min(1), categoryId: z.string().min(1).nullable(), counterAccountId: z.string().min(1).nullable().optional() })).min(1, "Selecione ao menos um lançamento."),
 });
 
 export async function confirmImportAction(payload: unknown): Promise<ActionResult<{ created: number }>> {

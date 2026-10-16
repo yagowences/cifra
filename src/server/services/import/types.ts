@@ -47,6 +47,10 @@ export const reviewRowSchema = parsedRowSchema.extend({
   confidence: z.number().min(0).max(1).nullable(),
   /** Confiança por campo quando a leitura foi por IA (PDF); ausente em OFX/CSV. */
   fieldConfidence: z.object({ date: z.number(), amount: z.number(), description: z.number() }).optional(),
+  /** Pagamento de fatura (transferência entre contas) ou crédito que abate despesa; ausente = lançamento comum. */
+  kind: z.enum(["transfer", "refund"]).nullable().optional(),
+  /** Outra conta do pagamento: a corrente que pagou (lote do cartão) ou o cartão pago (lote da corrente). */
+  counterAccountId: z.string().nullable().optional(),
 });
 
 /** Linha lida por IA com algum campo abaixo de 0,80: destacada e fora da seleção padrão. */

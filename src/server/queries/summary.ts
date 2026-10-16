@@ -8,8 +8,14 @@ import type { UserDb } from "@/server/db";
  * Agregados do dashboard em SQL cru e parametrizado. São também as ferramentas
  * do assistente: uma query só, para a tela e o chat nunca divergirem.
  * "Efetivo" = CONFIRMED ou RECONCILED, sem transferência: a regra de toda soma.
+ * Estorno, cashback e resgate de pontos (`is_refund`) são entradas que abatem despesa: não contam
+ * como receita e reduzem a despesa do mesmo período.
  */
 const EFFECTIVE = Prisma.sql`t.status in ('CONFIRMED', 'RECONCILED') and t.type <> 'TRANSFER'`;
+
+/** Despesa inclui os estornos (que a abatem); receita os exclui. */
+const typeFilter = (type: "EXPENSE" | "INCOME") =>
+  type === "EXPENSE" ? Prisma.sql`(t.type = 'EXPENSE' or t.is_refund)` : Prisma.sql`(t.type = 'INCOME' and not t.is_refund)`;
 
 const accountFilter = (accountIds?: string[]) =>
   accountIds && accountIds.length > 0 ? Prisma.sql`and t.account_id in (${Prisma.join(accountIds)})` : Prisma.empty;
@@ -25,8 +31,8 @@ export type Summary = {
 export async function getSummary(tx: UserDb, userId: string, period: Period, accountIds?: string[]): Promise<Summary> {
   const [row] = await tx.$queryRaw<{ income: bigint; expense: bigint }[]>`
     select
-      coalesce(sum(t.amount) filter (where t.amount > 0), 0)::bigint as income,
-      coalesce(sum(-t.amount) filter (where t.amount < 0), 0)::bigint as expense
+      coalesce(sum(t.amount) filter (where t.amount > 0 and not t.is_refund), 0)::bigint as income,
+      coalesce(sum(-t.amount) filter (where t.amount < 0 or t.is_refund), 0)::bigint as expense
     from public.transactions t
     where t.user_id = ${userId}::uuid
       and t.competence_date between ${fromISODate(period.start)} and ${fromISODate(period.end)}
@@ -64,11 +70,11 @@ export async function getByCategory(
   accountIds?: string[],
 ): Promise<CategoryTotal[]> {
   const rows = await tx.$queryRaw<{ category_id: string | null; name: string | null; icon: string | null; color: string | null; total: bigint }[]>`
-    select c.id as category_id, c.name, c.icon, c.color, sum(abs(t.amount))::bigint as total
+    select c.id as category_id, c.name, c.icon, c.color, sum(case when t.is_refund then -t.amount else abs(t.amount) end)::bigint as total
     from public.transactions t
     left join public.categories c on c.id = t.category_id
     where t.user_id = ${userId}::uuid
-      and t.type = ${type}::public.tx_type
+      and ${typeFilter(type)}
       and t.competence_date between ${fromISODate(period.start)} and ${fromISODate(period.end)}
       and ${EFFECTIVE}
       ${accountFilter(accountIds)}
@@ -105,12 +111,12 @@ export type CategoryDelta = {
 export async function comparePeriods(tx: UserDb, userId: string, before: Period, after: Period, type: "EXPENSE" | "INCOME" = "EXPENSE"): Promise<CategoryDelta[]> {
   const rows = await tx.$queryRaw<{ category_id: string | null; name: string | null; before: bigint; after: bigint }[]>`
     select c.id as category_id, c.name,
-      coalesce(sum(abs(t.amount)) filter (where t.competence_date between ${fromISODate(before.start)} and ${fromISODate(before.end)}), 0)::bigint as before,
-      coalesce(sum(abs(t.amount)) filter (where t.competence_date between ${fromISODate(after.start)} and ${fromISODate(after.end)}), 0)::bigint as after
+      coalesce(sum(case when t.is_refund then -t.amount else abs(t.amount) end) filter (where t.competence_date between ${fromISODate(before.start)} and ${fromISODate(before.end)}), 0)::bigint as before,
+      coalesce(sum(case when t.is_refund then -t.amount else abs(t.amount) end) filter (where t.competence_date between ${fromISODate(after.start)} and ${fromISODate(after.end)}), 0)::bigint as after
     from public.transactions t
     left join public.categories c on c.id = t.category_id
     where t.user_id = ${userId}::uuid
-      and t.type = ${type}::public.tx_type
+      and ${typeFilter(type)}
       and (
         t.competence_date between ${fromISODate(before.start)} and ${fromISODate(before.end)}
         or t.competence_date between ${fromISODate(after.start)} and ${fromISODate(after.end)}
@@ -143,8 +149,8 @@ export async function getMonthlyFlow(tx: UserDb, userId: string, endMonth: strin
   const end = monthPeriod(ey, em).end;
   const rows = await tx.$queryRaw<{ month: string; income: bigint; expense: bigint }[]>`
     select to_char(t.competence_date, 'YYYY-MM') as month,
-      coalesce(sum(t.amount) filter (where t.amount > 0), 0)::bigint as income,
-      coalesce(sum(-t.amount) filter (where t.amount < 0), 0)::bigint as expense
+      coalesce(sum(t.amount) filter (where t.amount > 0 and not t.is_refund), 0)::bigint as income,
+      coalesce(sum(-t.amount) filter (where t.amount < 0 or t.is_refund), 0)::bigint as expense
     from public.transactions t
     where t.user_id = ${userId}::uuid
       and t.competence_date between ${fromISODate(start)} and ${fromISODate(end)}

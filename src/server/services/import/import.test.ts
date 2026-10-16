@@ -131,14 +131,23 @@ describe.skipIf(!hasDb)("pipeline de importação", () => {
   });
 
   it("importar o mesmo arquivo de novo não cria duplicata", async () => {
-    const batch = await forUser(userId, (tx) => startImport(tx, userId, { accountId, fileName: "extrato.ofx", storageKey: `${userId}/imports/y.ofx`, format: "OFX", bytes }));
-    await processImportBatch(batch.id, bytes, null, { ai: null });
+    // Mesmo conteúdo, bytes diferentes (o banco reexporta com outra quebra de linha): o arquivo idêntico
+    // é barrado em startImport; aqui o que se testa é a dedup linha a linha.
+    const reexported = new TextEncoder().encode(`${OFX}\n`);
+    const batch = await forUser(userId, (tx) => startImport(tx, userId, { accountId, fileName: "extrato.ofx", storageKey: `${userId}/imports/y.ofx`, format: "OFX", bytes: reexported }));
+    await processImportBatch(batch.id, reexported, null, { ai: null });
     const rows = readReviewRows(await db.importBatch.findUniqueOrThrow({ where: { id: batch.id } }));
     expect(rows.every((r) => r.status === "duplicate")).toBe(true);
     expect(rows.map((r) => r.matchReason)).toEqual(Array(3).fill("Mesmo identificador do banco"));
 
     await expect(forUser(userId, (tx) => confirmImport(tx, userId, batch.id, [{ key: rows[0].key, categoryId: null }]))).rejects.toBeInstanceOf(ImportError);
     expect(await db.transaction.count({ where: { userId } })).toBe(3);
+  });
+
+  it("o mesmo arquivo, byte a byte, é recusado enquanto o lote anterior existe", async () => {
+    await expect(
+      forUser(userId, (tx) => startImport(tx, userId, { accountId, fileName: "extrato.ofx", storageKey: `${userId}/imports/dup.ofx`, format: "OFX", bytes })),
+    ).rejects.toThrow(/já foi importado|já está em importação/);
   });
 
   it("desfazer remove o que o lote criou e devolve a previsão", async () => {

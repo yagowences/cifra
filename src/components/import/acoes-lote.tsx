@@ -60,8 +60,8 @@ export function AcoesLote({ batchId, accountId, accounts, running }: { batchId: 
           ))}
         </NativeSelect>
       </label>
-      <Botao variant="secundario" onClick={trocar} carregando={busy === "troca"} disabled={running || busy !== null || selected === accountId}>
-        Trocar conta e reler
+      <Botao variant="secundario" onClick={trocar} carregando={busy === "troca"} disabled={running || busy !== null}>
+        {selected === accountId ? "Reler arquivo" : "Trocar conta e reler"}
       </Botao>
       <Botao variant="destrutivo" onClick={cancelar} carregando={busy === "cancela"} disabled={busy !== null}>
         <Trash2 size={16} strokeWidth={1.5} aria-hidden /> Cancelar importação

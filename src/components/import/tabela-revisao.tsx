@@ -1,7 +1,6 @@
 "use client";
 
-import { useRouter } from "next/navigation";
-import { useMemo, useState, useTransition } from "react";
+import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { Botao } from "@/components/botao";
 import { Valor } from "@/components/money/valor";
@@ -22,15 +21,15 @@ const STATUS_LABEL: Record<RowStatus, string> = {
   duplicate: "Duplicatas",
 };
 
-type Props = { batchId: string; rows: ReviewRow[]; categories: CategoryOption[]; month: string };
+type AccountChoice = { id: string; name: string; type: string };
+type Props = { batchId: string; rows: ReviewRow[]; categories: CategoryOption[]; month: string; accounts: AccountChoice[] };
 
 /**
  * Tabela de revisão: novas e casadas vêm marcadas; possível duplicata pede
  * decisão; duplicata exata não pode ser marcada. Linha sem categoria
  * sugerida fica destacada em warning até a pessoa escolher (ou aceitar sem).
  */
-export function TabelaRevisao({ batchId, rows, categories, month }: Props) {
-  const router = useRouter();
+export function TabelaRevisao({ batchId, rows, categories, month, accounts }: Props) {
   const [filter, setFilter] = useState<Filter>("all");
   // Novas e casadas vêm marcadas; linha de baixa confiança fica de fora até a pessoa conferir.
   const [selected, setSelected] = useState<Set<string>>(
@@ -39,7 +38,11 @@ export function TabelaRevisao({ batchId, rows, categories, month }: Props) {
   const [categoryOf, setCategoryOf] = useState<Record<string, string>>(() =>
     Object.fromEntries(rows.filter((r) => r.suggestedCategoryId).map((r) => [r.key, r.suggestedCategoryId!])),
   );
-  const [pending, startTransition] = useTransition();
+  // Pagamento de fatura: a outra conta vem sugerida; se não deu para adivinhar, a pessoa escolhe.
+  const [counterOf, setCounterOf] = useState<Record<string, string>>(() =>
+    Object.fromEntries(rows.filter((r) => r.kind === "transfer" && r.counterAccountId).map((r) => [r.key, r.counterAccountId!])),
+  );
+  const [pending, setPending] = useState(false);
 
   const counts = useMemo(() => {
     const c: Record<RowStatus, number> = { new: 0, possible_duplicate: 0, matched: 0, duplicate: 0 };
@@ -50,7 +53,8 @@ export function TabelaRevisao({ batchId, rows, categories, month }: Props) {
   const visible = filter === "all" ? rows : rows.filter((r) => r.status === filter);
   const selectable = rows.filter((r) => r.status !== "duplicate");
   const allSelected = selectable.length > 0 && selectable.every((r) => selected.has(r.key));
-  const undecided = rows.filter((r) => selected.has(r.key) && !categoryOf[r.key]).length;
+  const undecided = rows.filter((r) => selected.has(r.key) && r.kind !== "transfer" && !categoryOf[r.key]).length;
+  const missingCounter = rows.filter((r) => selected.has(r.key) && r.kind === "transfer" && !counterOf[r.key]).length;
 
   const toggle = (key: string) =>
     setSelected((s) => {
@@ -60,21 +64,31 @@ export function TabelaRevisao({ batchId, rows, categories, month }: Props) {
       return next;
     });
 
-  const confirm = () => {
-    startTransition(async () => {
-      const accepted = rows.filter((r) => selected.has(r.key)).map((r) => ({ key: r.key, categoryId: categoryOf[r.key] ?? null }));
+  const confirm = async () => {
+    setPending(true);
+    try {
+      const accepted = rows
+        .filter((r) => selected.has(r.key))
+        .map((r) => ({ key: r.key, categoryId: r.kind === "transfer" ? null : (categoryOf[r.key] ?? null), counterAccountId: r.kind === "transfer" ? (counterOf[r.key] ?? null) : null }));
       const result = await confirmImportAction({ batchId, accepted });
       if (!result.ok) {
         toast.error(result.message);
+        setPending(false);
         return;
       }
       toast.success(`${rows.length} lidos · ${result.data.created} novos · ${counts.duplicate} duplicados`);
-      router.push(`/transacoes?mes=${month}`);
-      router.refresh();
-    });
+      // Navegação completa, como o F5: router.push/refresh deixou telas desatualizadas em produção.
+      window.location.assign(`/transacoes?mes=${month}`);
+    } catch {
+      toast.error("Não consegui falar com o servidor. Recarregue a página para ver se a importação foi concluída.");
+      setPending(false);
+    }
   };
 
-  const categoriesFor = (row: ReviewRow) => categories.filter((c) => c.type === (BigInt(row.amount) >= 0n ? "INCOME" : "EXPENSE"));
+  // Estorno/pontos abatem despesa: escolhem entre categorias de despesa, mesmo sendo valor positivo.
+  const categoriesFor = (row: ReviewRow) => categories.filter((c) => c.type === (row.kind === "refund" ? "EXPENSE" : BigInt(row.amount) >= 0n ? "INCOME" : "EXPENSE"));
+  // Lote de cartão (valor positivo): a outra conta é a corrente que pagou; lote de corrente: o cartão pago.
+  const counterChoices = (row: ReviewRow) => accounts.filter((a) => (BigInt(row.amount) > 0n ? a.type === "CHECKING" || a.type === "SAVINGS" : a.type === "CREDIT_CARD"));
 
   return (
     <div className="flex flex-col gap-4">
@@ -121,7 +135,7 @@ export function TabelaRevisao({ batchId, rows, categories, month }: Props) {
           const isDup = row.status === "duplicate";
           const checked = selected.has(row.key);
           const lowConfidence = isLowConfidence(row);
-          const needsCategory = (checked && !categoryOf[row.key] && row.status !== "matched") || lowConfidence;
+          const needsCategory = (checked && !categoryOf[row.key] && row.status !== "matched" && row.kind !== "transfer") || lowConfidence;
           const minConfidence = row.fieldConfidence ? Math.min(row.fieldConfidence.date, row.fieldConfidence.amount, row.fieldConfidence.description) : null;
           return (
             <div
@@ -151,7 +165,21 @@ export function TabelaRevisao({ batchId, rows, categories, month }: Props) {
               </span>
               <Valor cents={row.amount} sign symbol={false} className="text-right" />
               <span className="col-span-2 col-start-2 lg:col-span-1 lg:col-start-auto">
-                {row.status === "matched" ? (
+                {row.kind === "transfer" && !isDup ? (
+                  <NativeSelect
+                    aria-label={`Outra conta do pagamento ${row.description}`}
+                    value={counterOf[row.key] ?? ""}
+                    onChange={(e) => setCounterOf((c) => ({ ...c, [row.key]: e.target.value }))}
+                    className={cn("h-9 text-caption", checked && !counterOf[row.key] && "border-warning")}
+                  >
+                    <option value="">{BigInt(row.amount) > 0n ? "Paga com qual conta?" : "Qual cartão?"}</option>
+                    {counterChoices(row).map((a) => (
+                      <option key={a.id} value={a.id}>
+                        {a.name}
+                      </option>
+                    ))}
+                  </NativeSelect>
+                ) : row.status === "matched" ? (
                   <span className="text-caption text-ink-secondary">Mantém a categoria da previsão</span>
                 ) : (
                   <NativeSelect
@@ -171,7 +199,9 @@ export function TabelaRevisao({ batchId, rows, categories, month }: Props) {
                 )}
               </span>
               <span className={cn("hidden text-right text-caption lg:block", row.status === "new" ? "text-ink-secondary" : row.status === "duplicate" ? "text-ink-muted" : "text-warning")}>
-                {row.status === "new" && minConfidence !== null ? (
+                {row.kind && row.status !== "duplicate" ? (
+                  <span className="text-ink-primary">{row.kind === "transfer" ? "Transferência" : "Estorno/pontos"}</span>
+                ) : row.status === "new" && minConfidence !== null ? (
                   <SeloConfianca value={minConfidence} />
                 ) : row.confidence !== null && row.status === "new" ? (
                   `${Math.round(row.confidence * 100)}%`
@@ -188,8 +218,9 @@ export function TabelaRevisao({ batchId, rows, categories, month }: Props) {
         <p className="tabular text-caption text-ink-secondary">
           {selected.size} {selected.size === 1 ? "selecionada" : "selecionadas"}
           {undecided > 0 && ` · ${undecided} sem categoria`}
+          {missingCounter > 0 && ` · ${missingCounter} pagamento${missingCounter === 1 ? "" : "s"} sem conta`}
         </p>
-        <Botao variant="primario" onClick={confirm} carregando={pending} disabled={selected.size === 0} className="w-full lg:w-auto">
+        <Botao variant="primario" onClick={confirm} carregando={pending} disabled={selected.size === 0 || missingCounter > 0} className="w-full lg:w-auto">
           Importar {selected.size} {selected.size === 1 ? "lançamento" : "lançamentos"}
         </Botao>
       </div>
