@@ -110,6 +110,69 @@ describe.skipIf(!hasDb)("cartão de crédito: pagamento, pontos e anti-duplicaç
     expect((await db.account.findUniqueOrThrow({ where: { id: bankId } })).currentBalance).toBe(896_000n);
   });
 
+  it("parcelas: competência no mês da fatura, caixa no vencimento, projeção nas próximas faturas e casamento na seguinte", async () => {
+    const ver = () => db.transaction.findMany({ where: { userId, accountId: cardId, description: { contains: "LOJA PARC" } }, orderBy: { installmentNo: "asc" } });
+
+    // Fatura de setembro: parcela 2 de 4, datada da compra original (julho).
+    const set = await importar(
+      cardId,
+      ofx([{ fitid: "p2", dia: "20260719", valor: "-200.00", nome: "LOJA PARC (Parcela 02 de 04)" }]),
+      "fatura-set.ofx",
+      () => ({ categoryId: null }),
+    );
+    expect(set.rows[0]).toMatchObject({ date: "2026-08-19", installmentNo: 2, installmentTotal: 4 });
+    await set.confirm();
+
+    let serie = await ver();
+    expect(serie.map((t) => [t.installmentNo, t.status])).toEqual([
+      [2, "CONFIRMED"],
+      [3, "PROJECTED"],
+      [4, "PROJECTED"],
+    ]);
+    // Fecha dia 5, vence dia 12: compra em 19/ago entra na fatura que fecha em 5/set e vence em 12/set.
+    expect(serie.map((t) => t.cashDate?.toISOString().slice(0, 10))).toEqual(["2026-09-12", "2026-10-12", "2026-11-12"]);
+    expect(serie.map((t) => t.competenceDate.toISOString().slice(0, 10))).toEqual(["2026-08-19", "2026-09-19", "2026-10-19"]);
+    expect(serie[1].parentId).toBe(serie[0].id);
+
+    // Mesma fatura reexportada: nada novo.
+    const again = await importar(
+      cardId,
+      new TextEncoder().encode(`${new TextDecoder().decode(ofx([{ fitid: "p2", dia: "20260719", valor: "-200.00", nome: "LOJA PARC (Parcela 02 de 04)" }]))}\n`),
+      "fatura-set-b.ofx",
+      () => ({ categoryId: null }),
+    );
+    expect(again.rows.map((r) => r.status)).toEqual(["duplicate"]);
+
+    // Fatura de outubro: a parcela 3 casa com a previsão, sem criar linha nova; a 4 continua prevista.
+    const out = await importar(
+      cardId,
+      ofx([{ fitid: "p3", dia: "20260719", valor: "-200.00", nome: "LOJA PARC (Parcela 03 de 04)" }]),
+      "fatura-out.ofx",
+      () => ({ categoryId: null }),
+    );
+    expect(out.rows[0]).toMatchObject({ status: "matched", date: "2026-09-19" });
+    await out.confirm();
+    serie = await ver();
+    expect(serie.map((t) => [t.installmentNo, t.status])).toEqual([
+      [2, "CONFIRMED"],
+      [3, "CONFIRMED"],
+      [4, "PROJECTED"],
+    ]);
+
+    // Valor diferente na parcela 4 (juros): casa pela série, e passa a valer o que o banco cobrou.
+    const nov = await importar(
+      cardId,
+      ofx([{ fitid: "p4", dia: "20260719", valor: "-203.50", nome: "LOJA PARC (Parcela 04 de 04)" }]),
+      "fatura-nov.ofx",
+      () => ({ categoryId: null }),
+    );
+    expect(nov.rows[0].status).toBe("matched");
+    await nov.confirm();
+    serie = await ver();
+    expect(serie.map((t) => t.status)).toEqual(["CONFIRMED", "CONFIRMED", "CONFIRMED"]);
+    expect(serie[2].amount).toBe(-20_350n);
+  });
+
   it("pagamento sem a outra conta não é aprovado", async () => {
     const { rows } = await importar(
       cardId,

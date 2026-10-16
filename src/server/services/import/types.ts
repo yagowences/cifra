@@ -12,6 +12,9 @@ export const parsedRowSchema = z.object({
   memo: z.string().nullable(),
   /** Saldo após o lançamento, quando o arquivo traz (centavos, string). */
   balanceAfter: z.string().nullable(),
+  /** Parcela N de M, quando a fatura do cartão escreve na descrição. */
+  installmentNo: z.number().int().optional(),
+  installmentTotal: z.number().int().optional(),
 });
 
 export type ParsedRow = z.infer<typeof parsedRowSchema>;

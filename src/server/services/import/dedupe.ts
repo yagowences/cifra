@@ -11,6 +11,8 @@ export type ExistingTx = {
   amount: string;
   description: string;
   status: "PENDING" | "CONFIRMED" | "RECONCILED" | "PROJECTED" | "IGNORED";
+  installmentNo?: number | null;
+  installmentTotal?: number | null;
 };
 
 /** Similaridade de Jaccard sobre trigramas da descrição normalizada, 0–1. */
@@ -68,7 +70,31 @@ export function dedupeRows(rows: ParsedRow[], existing: ExistingTx[], opts: Dedu
     if (byId) return decide("duplicate", byId.id, "Mesmo identificador do banco");
 
     const byFp = byFingerprint.get(fp);
-    if (byFp) return decide("duplicate", byFp.id, "Mesma conta, data, valor e descrição");
+    if (byFp) {
+      // Parcela projetada pela fatura anterior chega com a mesma impressão digital: é ela que está
+      // sendo confirmada, não uma duplicata.
+      if ((byFp.status === "PROJECTED" || byFp.status === "PENDING") && !claimed.has(byFp.id)) {
+        claimed.add(byFp.id);
+        return decide("matched", byFp.id, "Bate com um lançamento previsto");
+      }
+      return decide("duplicate", byFp.id, "Mesma conta, data, valor e descrição");
+    }
+
+    // Parcela N de M com a projeção da série, mesmo que o valor (juros, IOF) ou a data tenham mudado um pouco.
+    if (row.installmentNo && row.installmentTotal) {
+      const series = existing.find(
+        (e) =>
+          (e.status === "PROJECTED" || e.status === "PENDING") &&
+          !claimed.has(e.id) &&
+          e.installmentNo === row.installmentNo &&
+          e.installmentTotal === row.installmentTotal &&
+          similarity(e.description, row.description) >= threshold,
+      );
+      if (series) {
+        claimed.add(series.id);
+        return decide("matched", series.id, "Parcela prevista pela fatura anterior");
+      }
+    }
 
     const from = addDays(row.date, -fuzzyDays);
     const to = addDays(row.date, fuzzyDays);

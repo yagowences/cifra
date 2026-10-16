@@ -1,13 +1,15 @@
 import "server-only";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { Prisma, type ImportFormat } from "@prisma/client";
-import { addDays, fromISODate, toISODate } from "@/lib/dates";
+import { addDays, addMonths, cardCashDate, fromISODate, toISODate } from "@/lib/dates";
+import { withInstallmentNo } from "@/lib/installments";
 import { fingerprint, normalizeDescription } from "@/lib/fingerprint";
 import { db, forUser, type UserDb } from "@/server/db";
 import { categorizeCascade, categorizeWithLlm } from "@/server/services/categorize";
 import { NotFoundError } from "@/server/services/transactions";
 import { createAiClient, type AiClient, type BankHint } from "@/ai/client";
 import { importLlmCategorizationEnabled } from "@/ai/models";
+import { prepareCardRows } from "./card-installments";
 import { classifyRow, markExistingTransfers, suggestCounterAccount, TRANSFER_MATCH_DAYS, type ExistingTransfer } from "./card-credits";
 import { dedupeRows, type ExistingTx } from "./dedupe";
 import { parseCsv, previewCsv } from "./parsers/csv";
@@ -117,9 +119,12 @@ export async function processImportBatch(batchId: string, bytes: Uint8Array, map
     }
     const { rows: parsedRows, declaredClosingBalance, declaredOpeningBalance = null, warnings, fieldConfidence, aiCostCents = 0 } = parsed.result;
 
+    // Fatura de cartão: parcelas antigas voltam para o mês em que caem (a data do PDF é a da compra).
+    const lines = batch.account.type === "CREDIT_CARD" ? prepareCardRows(parsedRows) : parsedRows;
+
     const reviewRows = await forUser(userId, async (tx) => {
-      const dates = parsedRows.map((r) => r.date).sort();
-      const existing: ExistingTx[] = parsedRows.length
+      const dates = lines.map((r) => r.date).sort();
+      const existing: ExistingTx[] = lines.length
         ? (
             await tx.transaction.findMany({
               where: {
@@ -127,12 +132,12 @@ export async function processImportBatch(batchId: string, bytes: Uint8Array, map
                 accountId: batch.accountId,
                 competenceDate: { gte: fromISODate(addDays(dates[0], -3)), lte: fromISODate(addDays(dates[dates.length - 1], 3)) },
               },
-              select: { id: true, externalId: true, fingerprint: true, competenceDate: true, amount: true, description: true, status: true },
+              select: { id: true, externalId: true, fingerprint: true, competenceDate: true, amount: true, description: true, status: true, installmentNo: true, installmentTotal: true },
             })
           ).map((t) => ({ ...t, competenceDate: toISODate(t.competenceDate), amount: t.amount.toString() }))
         : [];
 
-      const dedupedPlain = dedupeRows(parsedRows, existing, { accountId: batch.accountId });
+      const dedupedPlain = dedupeRows(lines, existing, { accountId: batch.accountId });
 
       // Pagamento de fatura e crédito do cartão não são receita/despesa: marca o tipo da linha, sugere a
       // outra conta e descarta o que o extrato da outra conta já registrou como transferência.
@@ -287,6 +292,11 @@ export async function confirmImport(tx: UserDb, userId: string, batchId: string,
   if (!batch) throw new NotFoundError("Lote");
   if (batch.status !== "READY_FOR_REVIEW") throw new ImportError("Este lote não está em revisão.");
 
+  const account = await tx.account.findFirst({ where: { id: batch.accountId, userId }, select: { type: true, closingDay: true, dueDay: true } });
+  const card = account?.type === "CREDIT_CARD" && account.closingDay && account.dueDay ? { closing: account.closingDay, due: account.dueDay } : null;
+  // No cartão, o caixa é o vencimento da fatura em que a compra cai (regra do parcelamento manual).
+  const cashDateFor = (competence: string) => (card ? fromISODate(cardCashDate(competence, card.closing, card.due)) : null);
+
   const rows = readReviewRows(batch);
   const byKey = new Map(rows.map((r) => [r.key, r]));
   const chosen = accepted.map((a) => ({ a, row: byKey.get(a.key) })).filter((x): x is { a: AcceptedRow; row: ReviewRow } => Boolean(x.row));
@@ -311,6 +321,39 @@ export async function confirmImport(tx: UserDb, userId: string, batchId: string,
     if (owned !== counterIds.size) throw new ImportError("A outra conta do pagamento não foi encontrada.");
   }
 
+  // Parcela N de M numa fatura de cartão: as seguintes entram já como previsão nas próximas faturas.
+  const parentIds = new Map<string, string>();
+  const projections: Prisma.TransactionCreateManyInput[] = [];
+  for (const { a, row } of newRows) {
+    const amount = BigInt(row.amount);
+    if (!card || row.kind || amount >= 0n || !row.installmentNo || !row.installmentTotal || row.installmentNo >= row.installmentTotal) continue;
+    const parentId = randomUUID();
+    parentIds.set(row.key, parentId);
+    for (let k = row.installmentNo + 1; k <= row.installmentTotal; k++) {
+      const competence = addMonths(row.date, k - row.installmentNo);
+      const description = withInstallmentNo(row.description, k);
+      projections.push({
+        userId,
+        accountId: batch.accountId,
+        categoryId: a.categoryId ?? row.suggestedCategoryId ?? null,
+        amount,
+        type: "EXPENSE",
+        competenceDate: fromISODate(competence),
+        cashDate: cashDateFor(competence),
+        description,
+        originalDesc: description,
+        status: "PROJECTED",
+        source: "IMPORT",
+        importBatchId: batchId,
+        reviewed: true,
+        parentId,
+        installmentNo: k,
+        installmentTotal: row.installmentTotal,
+        fingerprint: fingerprint({ accountId: batch.accountId, competenceDate: competence, amount, description }),
+      });
+    }
+  }
+
   try {
     for (const { a, row } of matchedRows) {
       await tx.transaction.update({
@@ -323,6 +366,16 @@ export async function confirmImport(tx: UserDb, userId: string, batchId: string,
           importBatchId: batchId,
           reviewed: true,
           ...(a.categoryId ? { categoryId: a.categoryId } : {}),
+          // Parcela prevista pela fatura anterior: vale o que o banco escreveu agora (valor, texto) e a
+          // impressão digital acompanha, para reimportar a mesma fatura ser reconhecido como duplicata.
+          ...(row.installmentNo
+            ? {
+                description: row.description,
+                amount: BigInt(row.amount),
+                cashDate: cashDateFor(row.date),
+                fingerprint: fingerprint({ accountId: batch.accountId, competenceDate: row.date, amount: BigInt(row.amount), description: row.description }),
+              }
+            : {}),
         },
       });
     }
@@ -332,6 +385,7 @@ export async function confirmImport(tx: UserDb, userId: string, batchId: string,
           const amount = BigInt(row.amount);
           const common = {
             userId,
+            cashDate: row.kind === "transfer" ? null : cashDateFor(row.date),
             competenceDate: fromISODate(row.date),
             description: row.description,
             originalDesc: row.description,
@@ -359,6 +413,8 @@ export async function confirmImport(tx: UserDb, userId: string, batchId: string,
           }
           return {
             ...common,
+            ...(parentIds.has(row.key) ? { id: parentIds.get(row.key)! } : {}),
+            ...(card && !row.kind && amount < 0n && row.installmentNo && row.installmentTotal ? { installmentNo: row.installmentNo, installmentTotal: row.installmentTotal } : {}),
             accountId: batch.accountId,
             transferAccountId: null,
             categoryId: a.categoryId ?? row.suggestedCategoryId ?? null,
@@ -371,6 +427,7 @@ export async function confirmImport(tx: UserDb, userId: string, batchId: string,
         }),
       });
     }
+    if (projections.length) await tx.transaction.createMany({ data: projections, skipDuplicates: true });
   } catch (e) {
     if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
       throw new ImportError("Um dos lançamentos já existe na conta. Nada foi importado; revise as duplicatas.");
