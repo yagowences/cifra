@@ -19,7 +19,6 @@ const isBank = (type: string) => type === "CHECKING" || type === "SAVINGS";
 const CARD_PAYMENT = /\b(pagamento (on ?line|recebido|efetuado|de fatura|fatura|debito)|pgto|pag fatura|debito automatico)\b/;
 /** Pagamento de fatura visto da conta corrente. */
 const BANK_INVOICE = /\b(pagamento (de )?fatura|pgto fatura|pag fatura|fatura (do )?cartao|fatura cartao|cartao de credito)\b/;
-const CARD_REFUND = /\b(resgate|pontos|cashback|estorno|reembolso|devolucao|cancelamento|bonus)\b/;
 
 /**
  * Classifica uma linha pelo tipo da conta do lote e pelo texto. Determinístico, sem IA: o pagamento
